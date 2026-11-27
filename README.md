@@ -7,6 +7,10 @@ El agente lee el paquete de una solicitud de compra (correo, solicitud, cotizaci
 - Con confirmaciones, el agente pregunta y espera tu "confirmo".
 - Con bloqueos, no la crea y dice por qué y qué hacer.
 
+![Prompt del PRD §11 en el link público: el agente muestra la OC como quedaría en SAP, la confirmación RC5 con ambos valores (25 M frente a 26,5 M), crea la OC tras «confirmo» y después bloquea sol-002 por RC1](./docs/demo.gif)
+
+*Grabado en el link público con el modelo real: sol-004 (prompt del PRD §11 y «confirmo») y sol-002 bloqueada por RC1.*
+
 Planteamiento completo: **[SOLUCION.md](./SOLUCION.md)** · Especificación: [PRD.md](./PRD.md)
 
 **Prueba sugerida:** abre el link y pulsa **Probar sol-004**, o pega el prompt del PRD §11:
