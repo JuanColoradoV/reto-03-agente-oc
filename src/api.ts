@@ -8,6 +8,7 @@ import { claveUsable, MODELO_POR_DEFECTO } from "./llm/anthropic";
 import { mockEnabled } from "./llm/mock";
 import { MOCK_HEADER } from "./session/routes";
 import { MSG_PRESUPUESTO, parseBudget, type BudgetNamespace } from "./budget/ledger";
+import { chatHabilitado, consumirTopes, guardConfig, ipBloqueada, MSG_PAUSADA, origenPermitido, preChat, strike, type GuardEnv } from "./guard";
 
 export type Env = {
   ANTHROPIC_API_KEY?: string;
@@ -25,7 +26,7 @@ export type Env = {
   CHAT_LIMITER?: RateLimit;
   /** Idem para las lecturas GET de sesion (tope mas alto: la UI sondea mientras hay un turno en curso). */
   READ_LIMITER?: RateLimit;
-};
+} & GuardEnv; // guardas de costo/abuso: ver src/guard
 export const app = new Hono<{ Bindings: Env }>();
 
 // ---- Cabeceras de seguridad (API y respaldo de assets; las estaticas las pone public/_headers) ----
@@ -72,11 +73,17 @@ function rateLimitedLocal(key: string, max: number): boolean {
 app.use("/api/*", async (c, next) => {
   // Same-origin: no se emiten cabeceras CORS y se rechazan origenes ajenos.
   const origin = c.req.header("origin");
-  if (origin && origin !== new URL(c.req.url).origin) return c.json(err("origen_no_permitido", "Origen no permitido."), 403);
+  const mock = isMock(c);
+  // POST: Origin OBLIGATORIO (los navegadores siempre lo envian en fetch POST; con curl hay que pasarlo). En modo simulado (solo localhost) se tolera su ausencia.
+  if ((c.req.method === "POST" && !origin && !mock) || (origin && !origenPermitido(c.env, origin, new URL(c.req.url).origin))) {
+    return (await strike(c.env, c.req.header("cf-connecting-ip") ?? "sin-ip", mock)) ?? c.json(err("origen_no_permitido", "Origen no permitido."), 403);
+  }
   // La IP solo se toma de CF-Connecting-IP (la pone Cloudflare y el cliente no puede falsificarla). Sin ella
   // (p. ej. `wrangler dev`) todos comparten un solo cubo: x-forwarded-for lo controla el cliente y permitiria evadir el limite.
   const ip = c.req.header("cf-connecting-ip") ?? "sin-ip";
   if (c.req.method === "POST") {
+    const bloqueo = await ipBloqueada(c.env, ip, mock);
+    if (bloqueo) return bloqueo;
     const limited = c.env.CHAT_LIMITER ? !(await c.env.CHAT_LIMITER.limit({ key: ip })).success : rateLimitedLocal(`post:${ip}`, RATE.MAX);
     if (limited) return rateLimited(c);
   } else if (c.req.method === "GET" && /^\/api\/sesi(on|ons)\//.test(c.req.path)) {
@@ -113,7 +120,7 @@ const jsonInit = (body: unknown): RequestInit => ({ method: "POST", headers: { "
 // PRD 6.4: { ok, provider, model } sin exponer claves. Los demas campos son informativos para la UI (nunca la clave).
 app.get("/api/health", (c) => {
   const mock = isMock(c);
-  return c.json({ ok: true, provider: mock ? "mock" : "anthropic", model: mock ? "mock-guion" : c.env.LLM_MODEL || MODELO_POR_DEFECTO, hasApiKey: claveUsable(c.env.ANTHROPIC_API_KEY), mock, limits: { mensajeChars: CAPS.MENSAJE_CHARS } });
+  return c.json({ ok: true, provider: mock ? "mock" : "anthropic", model: mock ? "mock-guion" : c.env.LLM_MODEL || MODELO_POR_DEFECTO, hasApiKey: claveUsable(c.env.ANTHROPIC_API_KEY), mock, limits: { mensajeChars: guardConfig(c.env).maxChars } });
 });
 
 // Datos para los botones de accion rapida (sin LLM ni sesion).
@@ -130,11 +137,11 @@ app.get("/api/solicitudes", async (c) => {
 });
 
 /**
- * Cortacircuitos de costo: true si el gasto estimado de HOY (todas las sesiones) ya alcanzo el tope. Si el contador no responde
- * se deja pasar (disponibilidad primero; los topes por sesion y por IP siguen vigentes) y se registra el fallo.
+ * Cortacircuitos de costo: true si el gasto estimado de HOY (todas las sesiones) ya alcanzo el tope. Falla CERRADO: si el contador
+ * no responde (o falta el binding fuera de desarrollo) se deniega, porque la URL publica no puede gastar sin control.
  */
 async function presupuestoAgotado(env: Env): Promise<boolean> {
-  if (!env.BUDGET) return false;
+  if (!env.BUDGET) return env.ENV !== "dev";
   try {
     const tope = parseBudget(env.DAILY_BUDGET_USD);
     const consulta = env.BUDGET.get(env.BUDGET.idFromName("global")).consultar(tope);
@@ -147,15 +154,26 @@ async function presupuestoAgotado(env: Env): Promise<boolean> {
     }
   } catch (e) {
     console.error(JSON.stringify({ level: "error", event: "budget_check_failed", message: e instanceof Error ? e.message : String(e) }));
-    return false;
+    return true;
   }
 }
 
 app.post("/api/chat", async (c) => {
+  // Kill switch: CHAT_ENABLED=false (var o secreto) apaga el chat sin tocar el modelo.
+  if (!chatHabilitado(c.env)) return c.json(err("demo_pausada", MSG_PAUSADA), 503);
+  const ip = c.req.header("cf-connecting-ip") ?? "sin-ip";
   const b = chatBody.safeParse(await c.req.json().catch(() => null));
-  if (!b.success) return c.json(err("peticion_invalida", "Cuerpo de la petición inválido."), 400);
+  if (!b.success) return (await strike(c.env, ip, isMock(c))) ?? c.json(err("peticion_invalida", "Cuerpo de la petición inválido."), 400);
   const mensaje = (b.data.message ?? b.data.mensaje) as string;
-  if (mensaje.length > CAPS.MENSAJE_CHARS) return c.json(err("peticion_invalida", `El mensaje supera el límite de ${CAPS.MENSAJE_CHARS} caracteres.`), 400);
+  // Guardas previas al modelo, sin costo: tamano (GUARD_MAX_CHARS) y tema. Las respuestas enlatadas no llaman al modelo.
+  const corte = await preChat({
+    env: c.env, ip, mock: isMock(c), sessionId: b.data.sessionId, mensaje,
+    hayPendiente: async () => {
+      const r = await forwardRead(c, b.data.sessionId, "/state");
+      return r.ok && !!((await r.json()) as { pending?: unknown }).pending;
+    },
+  });
+  if (corte) return corte;
   if (!claveUsable(c.env.ANTHROPIC_API_KEY) && !isMock(c)) {
     return c.json(err("missing_api_key", "Falta configurar ANTHROPIC_API_KEY. Defínela en .dev.vars (local) o con `wrangler secret put ANTHROPIC_API_KEY`."), 503);
   }
@@ -164,6 +182,9 @@ app.post("/api/chat", async (c) => {
     c.header("Retry-After", "3600");
     return c.json(err("presupuesto_diario", MSG_PRESUPUESTO), 503);
   }
+  // Topes con costo (mensajes por sesion y por IP/dia): se cuentan solo los mensajes que llegan al modelo.
+  const tope = await consumirTopes({ env: c.env, ip, mock: isMock(c), sessionId: b.data.sessionId });
+  if (tope) return tope;
   return forward(c, b.data.sessionId, "/chat", jsonInit({ mensaje }));
 });
 

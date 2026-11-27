@@ -15,15 +15,32 @@
     "bindings": [
       { "name": "SESSIONS", "class_name": "SessionDO" },
       // Contador GLOBAL del gasto diario estimado (cortacircuitos de costo de la URL publica). Ver src/budget.
-      { "name": "BUDGET", "class_name": "BudgetDO" }
+      { "name": "BUDGET", "class_name": "BudgetDO" },
+      // Guardas de abuso: un objeto por IP (strikes/bloqueo/tope diario) y uno por sesion (tope de mensajes). Ver src/guard.
+      { "name": "GUARD", "class_name": "GuardDO" }
     ]
   },
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["SessionDO"] },
-    { "tag": "v2", "new_sqlite_classes": ["BudgetDO"] }
+    { "tag": "v2", "new_sqlite_classes": ["BudgetDO"] },
+    { "tag": "v3", "new_sqlite_classes": ["GuardDO"] }
   ],
   // Tope diario (USD, costo ESTIMADO sumado de todas las sesiones). Al superarlo /api/chat responde 503. Cambiarlo y redesplegar.
-  "vars": { "DAILY_BUDGET_USD": "2" },
+  "vars": {
+    "DAILY_BUDGET_USD": "2",
+    // Kill switch: "false" => /api/chat responde 503 sin tocar el modelo (redesplegar, o `wrangler secret put CHAT_ENABLED`).
+    "CHAT_ENABLED": "true",
+    // Guardas (src/guard): mensaje max (caracteres), mensajes por sesion, mensajes por IP/dia, strikes para bloquear, ventana y bloqueo (minutos).
+    "GUARD_MAX_CHARS": "600",
+    "GUARD_MAX_MSGS_SESSION": "30",
+    "GUARD_MAX_MSGS_IP_DAY": "60",
+    "GUARD_STRIKES": "8",
+    "GUARD_STRIKE_WINDOW_MIN": "60",
+    "GUARD_BLOCK_MIN": "60",
+    // Tokens (entrada+salida) por sesion: tope del ciclo del agente (src/agent/config.ts).
+    "TOKENS_SESION_MAX": "120000"
+    // ALLOWED_ORIGINS (opcional): origenes extra para POST, separados por coma. Por defecto solo el propio host.
+  },
   // Workers Rate Limiting: 20 POST / 60 s y 120 GET de sesion / 60 s por IP. Es aproximado (por ubicacion, consistencia eventual); el codigo cae a un limitador en memoria si no existe el binding.
   "ratelimits": [
     { "name": "CHAT_LIMITER", "namespace_id": "1001", "simple": { "limit": 20, "period": 60 } },

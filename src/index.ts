@@ -2,7 +2,8 @@
 // aqui solo se exporta junto con la clase del Durable Object.
 import api from "./api";
 import { BudgetDO } from "./budget/do";
+import { GuardDO } from "./guard/do";
 import { SessionDO } from "./session/do";
 
-export { BudgetDO, SessionDO };
+export { BudgetDO, GuardDO, SessionDO };
 export default api;

@@ -66,13 +66,13 @@ const SALUDO = /^(hola|holi|buenas|buenos dias|buenas tardes|buenas noches|hello
 // Respuesta a una confirmacion pendiente (solo valida si la sesion tiene una).
 const RESPUESTA = /^(si|sii+|sí|confirmo|confirmar|no|rechazo|rechazar|rechazado|cancela|cancelar|cancelo|ok|dale|adelante|apruebo|de acuerdo|yes|no confirmo|no la crees|no lo crees|no gracias)\b/;
 export const pareceRespuesta = (mensaje: string): boolean => {
-  const t = normalizar(mensaje);
+  const t = normalizar(mensaje).replace(/[^a-z0-9ñ\- ]/g, " ").replace(/\s+/g, " ").trim();
   return t.length <= 140 && RESPUESTA.test(t);
 };
 
 /** `pendiente`: la sesion espera una confirmacion humana (lo decide el servidor, no el cliente). */
 export function clasificar(mensaje: string, pendiente: boolean): Veredicto {
-  const t = normalizar(mensaje);
+  const t = normalizar(mensaje).replace(/[^a-z0-9ñ\- ]/g, " ").replace(/\s+/g, " ").trim();
   if (!t) return "fuera";
   if (INYECCION.test(t)) return "fuera";
   if (FUERTES.test(t)) return "ok";
