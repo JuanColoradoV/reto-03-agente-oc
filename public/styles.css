@@ -60,7 +60,10 @@ h1 { margin: 0; font-size: 17px; font-weight: 600; }
 .btn:active:not(:disabled) { transform: translateY(0); box-shadow: none; }
 .btn-quiet, .btn-outline { background: var(--surface); border-color: var(--border-strong); color: var(--btn-text); }
 .btn-quiet:hover:not(:disabled), .btn-outline:hover:not(:disabled) { background: var(--page); color: var(--text); }
-.empty .actions .btn { background: var(--code-bg); border-color: transparent; border-radius: 999px; min-height: 32px; padding: 0 14px; font-size: 13px; }
+.empty .actions-label { align-self: center; font-size: 13px; font-weight: 600; color: var(--text); margin-right: 2px; }
+.audit-link { display: inline-flex; align-items: center; justify-content: center; margin-top: 12px; text-decoration: none; min-height: 36px; font-size: 13px; text-align: center; }
+.empty .actions .btn { background: var(--code-bg); border-color: transparent; border-radius: 999px; min-height: 36px; padding: 4px 14px; font-size: 13px; }
+.empty .actions .btn { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
 .empty .actions .btn:hover:not(:disabled) { background: var(--tint-blue); color: var(--accent-text); transform: none; }
 .head-actions .btn { min-height: 30px; padding: 0 10px; font-size: 13px; }
 .drawer-toggle, .drawer-close { display: none; }

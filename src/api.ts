@@ -144,6 +144,11 @@ app.get("/api/sesion/:id/traza", async (c) => {
   const id = sessionId.safeParse(c.req.param("id"));
   return id.success ? forwardRead(c, id.data, "/trace") : c.json(err("peticion_invalida", "Sesión inválida."), 400);
 });
+// Informe de auditoría (JSON) de la sesión. Misma validación de id y mismo limitador de lecturas (READ_LIMITER) que estado/traza.
+app.get("/api/sesion/:id/auditoria", async (c) => {
+  const id = sessionId.safeParse(c.req.param("id"));
+  return id.success ? forwardRead(c, id.data, "/auditoria") : c.json(err("peticion_invalida", "Sesión inválida."), 400);
+});
 app.post("/api/sesion/:id/reset", async (c) => {
   const id = sessionId.safeParse(c.req.param("id"));
   return id.success ? forward(c, id.data, "/reset", { method: "POST" }) : c.json(err("peticion_invalida", "Sesión inválida."), 400);

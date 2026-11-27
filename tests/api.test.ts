@@ -65,6 +65,63 @@ test("la API rechaza rechazar sin motivo (400, motivo_requerido) y acepta con mo
   assert.equal((await session.snapshot()).pending, null);
 });
 
+test("auditoría: GET /api/sesion/:id/auditoria devuelve controles, decisión con comentario, OC, llamadas y costo; valida id y usa el limitador de lecturas", async () => {
+  const sessionEnv: SessionEnv = { makeClient: () => createMockClient(), systemPrompt: getPrompt(), tools: ocTools, fecha: () => "2026-01-15", now: () => "2026-01-15T00:00:00.000Z", log: () => {} };
+  const session = new Session(SID, new SessionStore(new MemoryKV()), sessionEnv);
+  const aprobar = async (id: string, decision: "aprobar" | "rechazar", comentario: string) => {
+    const { events } = await collect((on) => session.chat(`Procesa la solicitud ${id}`, on));
+    const pc = events.find((e) => e.type === "pending_confirmation");
+    if (pc?.type === "pending_confirmation") await collect((on) => session.confirm(pc.pending.pendingId, decision, comentario, on));
+    return Boolean(pc);
+  };
+  assert.equal(await aprobar("sol-000", "aprobar", "Todo bien"), true);
+  assert.equal(await aprobar("sol-00X", "aprobar", "x"), false); // bloqueada por C1: no hay tarjeta de aprobación
+
+  const llamadas: string[] = [];
+  const sessionApp = buildSessionApp(() => session);
+  const envAud = {
+    ...env,
+    SESSIONS: { idFromName: (n: string) => n, get: () => ({ fetch: (url: string, init?: RequestInit) => { llamadas.push(new URL(url).pathname); return sessionApp.request(new URL(url).pathname, init); } }) },
+  } as unknown as Env;
+  const get = (id: string, ip: string, e = envAud) => app.request(`/api/sesion/${id}/auditoria`, { headers: { "cf-connecting-ip": ip } }, e);
+
+  const res = await get(SID, "10.1.1.1");
+  assert.equal(res.status, 200);
+  assert.deepEqual(llamadas, ["/auditoria"]);
+  type Aud = import("../src/session/auditoria").Auditoria;
+  const aud = (await res.json()) as Aud;
+  assert.equal(aud.sessionId, SID);
+  const s0 = aud.solicitudes.find((s) => s.solicitudId === "sol-000")!;
+  assert.equal(s0.estado, "OC_CREADA");
+  assert.equal(s0.oc?.numero, "4500000001");
+  assert.equal(s0.oc?.comentarioAprobador, "Todo bien");
+  assert.equal(s0.aprobacion.length, 1);
+  assert.equal(s0.aprobacion[0]!.decision, "aprobar");
+  assert.equal(s0.aprobacion[0]!.comentario, "Todo bien");
+  assert.ok(s0.aprobacion[0]!.decididaEn && s0.aprobacion[0]!.solicitadaEn);
+  assert.equal(s0.controles?.length, 5);
+  assert.ok(s0.llamadasHerramientas.some((l) => l.herramienta === "crear_orden_compra"));
+  const sx = aud.solicitudes.find((s) => s.solicitudId === "sol-00X")!;
+  assert.equal(sx.estado, "BLOQUEADA_O_SIN_PROCESAR");
+  assert.equal(sx.oc, null);
+  assert.equal(sx.controles?.find((c) => c.id === "C1")?.resultado, "FALLA");
+  assert.ok(aud.turnos.length >= 2);
+  assert.ok(aud.costoTotal.llamadasModelo > 0);
+
+  // id inválido: 400 sin llegar al DO
+  const antes = llamadas.length;
+  const bad = await get("no-es-uuid", "10.1.1.2");
+  assert.equal(bad.status, 400);
+  assert.equal(llamadas.length, antes);
+
+  // limitador de lecturas: el binding READ_LIMITER se consulta y, si rechaza, 429
+  let llamadasLimiter = 0;
+  const limitado = { ...envAud, READ_LIMITER: { limit: async () => { llamadasLimiter++; return { success: false }; } } } as unknown as Env;
+  const r429 = await get(SID, "10.1.1.3", limitado);
+  assert.equal(r429.status, 429);
+  assert.equal(llamadasLimiter, 1);
+});
+
 // Va al final: agota el cubo de 20 POST/min de su IP.
 test("429: Retry-After 60 y mensaje 'Espera 1 minuto'", async () => {
   let last: Response | undefined;

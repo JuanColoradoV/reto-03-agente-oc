@@ -306,7 +306,17 @@ async function handleToolUse(
   pending.view.pendingId = pending.pendingId;
   state.messages.push(assistant);
   state.pending = pending;
-  state.audit.push({ ts: deps.now(), type: "pending_creado", pendingId: pending.pendingId, tool: pending.name, input: pending.input, traceId: turn.traceId });
+  // Se guardan los controles tal como los vio la persona que aprueba (para el informe de auditoría).
+  const vista = gated.view as { solicitudId?: string; controles?: unknown } | undefined;
+  state.audit.push({
+    ts: deps.now(),
+    type: "pending_creado",
+    pendingId: pending.pendingId,
+    tool: pending.name,
+    input: pending.input,
+    traceId: turn.traceId,
+    ...(vista?.solicitudId ? { solicitudId: vista.solicitudId, controles: vista.controles } : {}),
+  });
   await deps.persist();
   await emit({ type: "pending_confirmation", pending: pending.view });
   return "pending_confirmation";

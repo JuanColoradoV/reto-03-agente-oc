@@ -44,9 +44,16 @@ export interface CasoSolicitud {
   factura: string | null;
 }
 
+/**
+ * Maestros. `proveedores` es obligatorio; los otros tres son OPCIONALES hasta que llegue el PRD: se cargan si el archivo
+ * existe en fixtures/reto-03/maestros/ y su forma es `unknown` a propósito (no inventar el esquema).
+ * [TODO: tipar con la forma real de centros-costo.json, indicadores-iva.json y condiciones-pago.json]
+ */
 export interface Maestros {
   proveedores: Proveedor[];
-  // [TODO] centros-costo, indicadores-iva, condiciones-pago
+  centrosCosto?: unknown;
+  indicadoresIva?: unknown;
+  condicionesPago?: unknown;
 }
 
 /** Severidad de un control: un incumplimiento bloqueante da FALLA; uno de alerta da ALERTA. */

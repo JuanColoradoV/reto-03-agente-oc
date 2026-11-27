@@ -11,6 +11,7 @@ import { CAPS, type SessionState, type TurnTrace } from "../agent/state";
 import { MODEL_AGENT, MissingApiKeyError } from "../llm/client";
 import { InMemorySap } from "../sap";
 import type { ToolDef } from "../tools/registry";
+import { construirAuditoria, type Auditoria } from "./auditoria";
 import type { SessionStore } from "./storage";
 
 export class SessionError extends Error {
@@ -302,6 +303,10 @@ export class Session {
 
   async trace(): Promise<TurnTrace[]> {
     return (await this.store.load()).trace;
+  }
+
+  async auditoria(): Promise<Auditoria> {
+    return construirAuditoria(this.sessionId, await this.store.load(), this.env.now());
   }
 
   async reset(): Promise<void> {

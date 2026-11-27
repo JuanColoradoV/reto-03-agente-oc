@@ -33,7 +33,7 @@
       </div>
       <form id="composer" class="composer">
         <label class="sr-only" for="input">Mensaje para el agente</label>
-        <textarea id="input" rows="1" placeholder="Ej.: &quot;Procesa la solicitud sol-000&quot; o &quot;¿Qué controles fallaron en sol-00X?&quot;"></textarea>
+        <textarea id="input" rows="1" placeholder="Escribe tu petición o elige una solicitud"></textarea>
         <button id="send" class="btn btn-primary" type="submit">Enviar</button>
       </form>
       <p class="composer-help">Enter envía · Shift+Enter agrega una línea</p>
@@ -55,6 +55,7 @@
         <h2 id="trace-title" class="side-title">Traza y costo</h2>
         <label class="toggle small"><input type="checkbox" id="show-usage"> Mostrar costos en el chat</label>
         <div id="trace" class="trace"><p class="muted small">Aún sin actividad.</p></div>
+        <a id="audit-link" class="btn btn-quiet audit-link" href="#" download="auditoria.json" title="Controles, aprobaciones con su comentario o motivo, número de OC, herramientas y costo de esta conversación">Descargar auditoría (JSON)</a>
       </section>
     </aside>
   </div>

@@ -16,8 +16,16 @@ export function cargarCaso(id: string): CasoSolicitud {
   };
 }
 
+/** Maestro opcional: se carga si el archivo existe (maestros/<nombre>.json); si falta, undefined (sin error). */
+const opcional = (nombre: string): unknown => (hasFile(`maestros/${nombre}.json`) ? getJson<unknown>(`maestros/${nombre}.json`) : undefined);
+
 export function cargarMaestros(): Maestros {
-  return {
-    proveedores: getJson<Proveedor[]>("maestros/proveedores.json"),
-  };
+  const m: Maestros = { proveedores: getJson<Proveedor[]>("maestros/proveedores.json") };
+  const centrosCosto = opcional("centros-costo");
+  const indicadoresIva = opcional("indicadores-iva");
+  const condicionesPago = opcional("condiciones-pago");
+  if (centrosCosto !== undefined) m.centrosCosto = centrosCosto;
+  if (indicadoresIva !== undefined) m.indicadoresIva = indicadoresIva;
+  if (condicionesPago !== undefined) m.condicionesPago = condicionesPago;
+  return m;
 }

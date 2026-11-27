@@ -20,6 +20,13 @@ export interface Esperados {
   casos: Record<string, Esperado>;
 }
 
+/**
+ * Casos que DEBEN existir (fixtures y esperados). null = no se exige un conjunto fijo (placeholders sol-000 / sol-00X).
+ * Cuando llegue el PRD: cambiar a ["sol-001", "sol-002", "sol-003", "sol-004", "sol-005", "sol-006"] y la demo fallara si falta alguno.
+ */
+export const CASOS_REQUERIDOS: readonly string[] | null = null;
+// export const CASOS_REQUERIDOS = ["sol-001", "sol-002", "sol-003", "sol-004", "sol-005", "sol-006"] as const;
+
 export const cargarEsperados = (): Esperados => getJson<Esperados>("esperados.json");
 
 export interface DemoResult {
@@ -29,7 +36,7 @@ export interface DemoResult {
 
 const pad = (s: string, n: number) => s.padEnd(n);
 
-export async function ejecutarDemo(esperados: Esperados = cargarEsperados()): Promise<DemoResult> {
+export async function ejecutarDemo(esperados: Esperados = cargarEsperados(), requeridos: readonly string[] | null = CASOS_REQUERIDOS): Promise<DemoResult> {
   const lines: string[] = [];
   const line = (s = "") => lines.push(s);
   const ctx: ToolContext = { sap: new InMemorySap(), fecha: FECHA_REFERENCIA };
@@ -44,10 +51,24 @@ export async function ejecutarDemo(esperados: Esperados = cargarEsperados()): Pr
 
   const ids = listCases();
   if (ids.length === 0) throw new Error("No hay casos en fixtures/reto-03/solicitudes");
-  for (const id of Object.keys(esperados.casos)) {
+  // Cobertura en ambas direcciones: cada esperado debe tener fixture y cada fixture debe tener esperado.
+  const esperadosIds = Object.keys(esperados.casos);
+  for (const id of esperadosIds) {
     if (!ids.includes(id)) {
       fallos++;
-      line(`FALLA: el caso esperado ${id} no existe en los fixtures.`);
+      line(`FALLA: el caso esperado ${id} no tiene fixture en fixtures/reto-03/solicitudes/.`);
+    }
+  }
+  for (const id of ids) {
+    if (!esperadosIds.includes(id)) {
+      fallos++;
+      line(`FALLA: el fixture ${id} no tiene resultado esperado en esperados.json.`);
+    }
+  }
+  for (const id of requeridos ?? []) {
+    if (!ids.includes(id) || !esperadosIds.includes(id)) {
+      fallos++;
+      line(`FALLA: el caso requerido ${id} falta (fixture: ${ids.includes(id) ? "si" : "NO"}, esperado: ${esperadosIds.includes(id) ? "si" : "NO"}).`);
     }
   }
 

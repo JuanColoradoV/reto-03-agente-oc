@@ -236,7 +236,7 @@
     $("loading-text").textContent = busy ? "El agente está trabajando…" : "Preparando el agente y cargando la conversación…";
     sendBtn.disabled = lock;
     input.disabled = lock;
-    input.placeholder = pendingId ? (SHORT.matches ? "Resuelve la aprobación…" : "Resuelve la aprobación pendiente para continuar…") : SHORT.matches ? "Escribe o elige una solicitud…" : 'Ej.: "Procesa la solicitud sol-000" o "¿Qué controles fallaron en sol-00X?"';
+    input.placeholder = pendingId ? (SHORT.matches ? "Resuelve la aprobación…" : "Resuelve la aprobación pendiente para continuar…") : SHORT.matches ? "Escribe o elige una solicitud…" : `Ej.: ${examples()}`;
     // Una solicitud con OC creada no se puede procesar de nuevo (el servidor tambien lo bloquea: control C0).
     document.querySelectorAll("[data-quick]").forEach((c) => (c.disabled = lock || c.dataset.done === "1"));
     // Los botones de la tarjeta de aprobacion se habilitan solo cuando el servidor termino el turno (estado ya guardado y
@@ -251,6 +251,11 @@
   function setBusy(b) { busy = b; refreshControls(); }
 
   // ---------- estado vacio, solicitudes y traza ----------
+  // Ejemplos de texto derivados de las solicitudes que devuelve la API (nada de IDs fijos en el código).
+  function examples() {
+    const [a, b] = solicitudes.map((x) => x.id);
+    return a ? `"Procesa la solicitud ${a}"` + (b ? ` o "¿Qué controles fallaron en ${b}?"` : "") : '"Procesa una solicitud"';
+  }
   const quickMessage = (id) => `Procesa la solicitud ${id}: léela, valida los controles y, si corresponde, pídeme confirmación para crear la orden de compra.`;
 
   function renderEmpty() {
@@ -261,17 +266,20 @@
       el("p", "lead", "El agente lee los documentos de una solicitud, revisa los controles de compra y, solo si tú apruebas, crea la orden en SAP (simulado). Elige una solicitud o escríbele."),
     );
     const steps = el("ol", "steps");
-    [["Lee los documentos.", "El correo, la cotización y la aprobación."], ["Valida los controles.", "Te muestra cada resultado, uno por uno."], ["Te pide aprobación.", "Sin tu decisión no se crea nada."], ["Crea la OC en SAP.", "Solo después de que apruebes."]].forEach(([h, t]) => { const li = el("li"); li.append(el("strong", "", h), document.createTextNode(" " + t)); steps.append(li); });
+    [["Lee la solicitud.", "El correo, la cotización y la aprobación."], ["Valida los controles.", "Te muestra cada resultado, uno por uno."], ["Pide tu aprobación y crea la OC.", "Sin tu decisión no se crea nada en SAP."]].forEach(([h, t]) => { const li = el("li"); li.append(el("strong", "", h), document.createTextNode(" " + t)); steps.append(li); });
     const acts = el("div", "actions");
+    acts.setAttribute("role", "group");
+    acts.setAttribute("aria-label", "Probar un caso");
+    if (solicitudes.length) acts.append(el("span", "actions-label", "Probar un caso:"));
     for (const s of solicitudes) {
       const oc = solOc.get(s.id);
-      const b = el("button", "btn btn-quiet", oc ? `${s.id} · ya tiene OC ${oc}` : `Procesar ${s.id}`);
+      const b = el("button", "btn btn-quiet", oc ? `${s.id} · ya tiene OC ${oc}` : `Probar ${s.id}`);
       b.type = "button"; b.dataset.quick = "1"; b.title = oc ? `La solicitud ya tiene la OC ${oc}: no se puede procesar de nuevo.` : s.asunto || "";
       if (oc) b.dataset.done = "1";
       b.onclick = () => send(quickMessage(s.id));
       acts.append(b);
     }
-    box.append(steps, acts, el("p", "examples", 'También puedes escribir: "Procesa la solicitud sol-000" o "¿Qué controles fallaron en sol-00X?"'));
+    box.append(steps, acts, el("p", "examples", solicitudes.length ? `También puedes escribir: ${examples()}` : "También puedes escribir tu petición en el cuadro de abajo."));
     return box;
   }
 
@@ -959,6 +967,11 @@
     await Promise.all(tasks);
     if (!first && myGen === gen) { restoring = false; refreshControls(); }
   }
+  // Enlace de descarga de la auditoría: el sessionId cambia con "Nueva conversación", así que se resuelve al hacer clic.
+  const auditLink = $("audit-link");
+  const auditUrl = () => `/api/sesion/${sessionId}/auditoria`;
+  auditLink.href = auditUrl();
+  auditLink.addEventListener("click", () => { auditLink.href = auditUrl(); auditLink.download = `auditoria-${sessionId.slice(0, 8)}.json`; });
   clearLog();
   init();
 })();

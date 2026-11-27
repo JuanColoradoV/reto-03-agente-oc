@@ -8,9 +8,16 @@ export const CONTROLES: readonly ControlDef[] = [C0_OC_EXISTENTE, C1_PROVEEDOR, 
 
 export function evaluarControl(def: ControlDef, caso: CasoSolicitud, maestros: Maestros, ctx?: ControlCtx): ResultadoControl {
   const ev = def.evaluar(caso, maestros, ctx);
-  const resultado =
-    ev.estado === "CUMPLE" ? "OK" : ev.estado === "NO_EVALUABLE" ? "ALERTA" : def.severidad === "bloqueante" ? "FALLA" : "ALERTA";
-  return { id: def.id, nombre: def.nombre, descripcion: def.descripcion, accion: def.accion, severidad: def.severidad, resultado, detalle: ev.detalle };
+  let resultado: ResultadoControl["resultado"];
+  let detalle = ev.detalle;
+  if (ev.estado === "CUMPLE") resultado = "OK";
+  else if (ev.estado === "NO_EVALUABLE") {
+    // Política: lo que no se puede verificar no se da por bueno. Si el control es bloqueante => FALLA (no se crea OC);
+    // si es de alerta => ALERTA (decide el humano).
+    resultado = def.severidad === "bloqueante" ? "FALLA" : "ALERTA";
+    if (def.severidad === "bloqueante") detalle = `No se pudo verificar: ${ev.detalle}`;
+  } else resultado = def.severidad === "bloqueante" ? "FALLA" : "ALERTA";
+  return { id: def.id, nombre: def.nombre, descripcion: def.descripcion, accion: def.accion, severidad: def.severidad, resultado, detalle };
 }
 
 export function evaluarControles(caso: CasoSolicitud, maestros: Maestros, ctx?: ControlCtx): ResultadoControl[] {
@@ -29,6 +36,7 @@ export function validarControles(caso: CasoSolicitud, maestros: Maestros, ctx?: 
 
 /** Matriz de controles en Markdown, derivada del registro (para SOLUCION.md y demo.ts). */
 export function matrizMarkdown(): string {
-  const rows = CONTROLES.map((c) => `| ${c.id} | ${c.nombre} | ${c.regla} | ${c.severidad} | ${c.fuente} |`);
-  return ["| ID | Control | Regla | Severidad | Fuente |", "|---|---|---|---|---|", ...rows].join("\n");
+  const cell = (t: string) => t.replace(/\|/g, "\\|");
+  const rows = CONTROLES.map((c) => `| ${c.id} | ${cell(c.nombre)} | ${cell(c.regla)} | ${c.severidad} | ${cell(c.fuente)} | ${cell(c.accion)} |`);
+  return ["| ID | Control | Regla | Severidad | Fuente | Acción si no se cumple |", "|---|---|---|---|---|---|", ...rows].join("\n");
 }
