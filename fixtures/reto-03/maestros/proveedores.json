@@ -1,0 +1,4 @@
+[
+  { "_placeholder": "DATOS DE EJEMPLO - reemplazar por los fixtures reales", "id": "P-0001", "nombre": "Proveedor Demo SAS", "nit": "900000000-0", "activo": true, "bloqueado": false },
+  { "_placeholder": "DATOS DE EJEMPLO (caso negativo)", "id": "P-0002", "nombre": "Proveedor Inactivo SAS", "nit": "900000001-1", "activo": false, "bloqueado": false }
+]

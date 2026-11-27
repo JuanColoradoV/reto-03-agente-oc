@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Agente OC</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <a class="skip" href="#input">Ir al mensaje</a>
+  <header class="app-head">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h9l4 4v14H6z"/><path d="M9 12h7M9 16h7M9 8h3"/></svg>
+      </span>
+      <div class="brand-text">
+        <h1>Agente OC</h1>
+        <p class="sub">Órdenes de compra · SAP simulado</p>
+      </div>
+    </div>
+    <div class="head-actions">
+      <span id="mode-badge" class="badge mode" role="status" hidden>MODO SIMULADO</span>
+      <span id="health-badge" class="badge health" role="status" data-state="pending"><span class="dotmark" aria-hidden="true"></span><span id="health-text">Conectando…</span></span>
+      <button id="drawer-toggle" class="btn btn-quiet drawer-toggle" type="button" aria-expanded="false" aria-controls="side">Solicitudes</button>
+      <button id="reset" class="btn btn-quiet" type="button">Nueva conversación</button>
+    </div>
+  </header>
+
+  <div id="banner" class="banner" role="alert" hidden></div>
+
+  <div class="shell">
+    <section class="chat" aria-label="Conversación">
+      <div id="scroller" class="scroller" tabindex="-1">
+        <div id="log" class="log" aria-live="polite"></div>
+        <div id="loading" class="loading" role="status"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span id="loading-text">Preparando el agente…</span></div>
+      </div>
+      <form id="composer" class="composer">
+        <label class="sr-only" for="input">Mensaje para el agente</label>
+        <textarea id="input" rows="1" placeholder="Escribe tu mensaje…  (Enter envía, Shift+Enter agrega una línea)" maxlength="4000"></textarea>
+        <button id="send" class="btn btn-primary" type="submit">Enviar</button>
+      </form>
+      <p id="composer-hint" class="composer-hint" role="status" hidden></p>
+    </section>
+
+    <aside id="side" class="side" aria-label="Solicitudes y traza">
+      <div class="side-head">
+        <h2>Solicitudes</h2>
+        <button id="drawer-close" class="btn btn-quiet drawer-close" type="button" aria-label="Cerrar panel">Cerrar</button>
+      </div>
+      <ul id="quick" class="req-list"></ul>
+
+      <section class="side-section" aria-labelledby="trace-title">
+        <h2 id="trace-title" class="side-title">Traza y costo</h2>
+        <div id="trace" class="trace"><p class="muted small">Aún sin actividad.</p></div>
+      </section>
+    </aside>
+  </div>
+  <div id="scrim" class="scrim" hidden></div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

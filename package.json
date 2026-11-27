@@ -1,0 +1,33 @@
+{
+  "name": "reto-03",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Agente conversacional de ordenes de compra (SAP simulado) - Reto 3",
+  "scripts": {
+    "bundle": "tsx scripts/bundle-fixtures.ts",
+    "predev": "npm run bundle",
+    "dev": "wrangler dev",
+    "predemo": "npm run bundle",
+    "demo": "tsx demo.ts",
+    "pretypecheck": "npm run bundle",
+    "typecheck": "tsc --noEmit",
+    "predeploy": "npm run bundle",
+    "deploy": "wrangler deploy",
+    "pretest": "npm run bundle",
+    "test": "tsx --test tests/*.test.ts",
+    "check": "npm run typecheck && npm test && npm run demo"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.14.0",
+    "hono": "^4.13.23",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261127.1",
+    "@types/node": "^26.6.11",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "wrangler": "^4.169.0"
+  }
+}

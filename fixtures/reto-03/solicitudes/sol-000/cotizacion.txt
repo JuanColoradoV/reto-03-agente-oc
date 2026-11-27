@@ -1,0 +1,4 @@
+[DATOS DE EJEMPLO]
+COTIZACION 0001 - Proveedor Demo SAS
+10 x Silla de oficina ergonomica @ 250.000
+TOTAL: 2500000 COP

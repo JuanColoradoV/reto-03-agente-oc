@@ -1,0 +1,4 @@
+[DATOS DE EJEMPLO]
+COTIZACION 0002 - Proveedor Inactivo SAS
+5 x Escritorio de oficina @ 400.000
+TOTAL: 2000000 COP
