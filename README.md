@@ -48,7 +48,7 @@ npx wrangler secret put ANTHROPIC_API_KEY   # queda como secreto del Worker
 npm run deploy                              # bundle de fixtures + wrangler deploy
 ```
 
-Tope de gasto diario de la demo pública: variable `DAILY_BUDGET_USD` en `wrangler.jsonc` (5 USD por defecto); al superarlo `/api/chat` responde 503.
+Tope de gasto diario de la demo pública: variable `DAILY_BUDGET_USD` en `wrangler.jsonc` (2 USD en la demo pública); al superarlo `/api/chat` responde 503.
 
 ## Estructura
 
