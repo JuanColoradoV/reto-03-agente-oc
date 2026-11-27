@@ -1,7 +1,7 @@
 # Copiar a .dev.vars (esta ignorado por git):  cp .dev.vars.example .dev.vars
 # En produccion NO se usa este archivo: npx wrangler secret put ANTHROPIC_API_KEY
 
-# Opcion A - sin API key (modo simulado, solo en localhost): un guion recorre el flujo completo. Descomenta la linea:
+# Opcion A - sin API key (modo simulado, solo en localhost): un guion recorre el flujo completo (activo por defecto):
 MOCK_LLM=1
 
 # Opcion B - con Claude real: comenta MOCK_LLM, pon tu clave y descomenta la linea.
