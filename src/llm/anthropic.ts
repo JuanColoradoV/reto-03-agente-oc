@@ -15,9 +15,11 @@ export class FaltaClaveError extends Error {
   }
 }
 
-/** true si `key` parece una clave real (`sk-ant-...`); un placeholder como `sk-ant-...` no cuenta. */
+/** true si `key` parece una clave real; un placeholder (`sk-ant-...`, vacío o demasiado corto) no cuenta. */
 export function claveUsable(key: string | undefined): key is string {
-  return typeof key === "string" && /^sk-ant-[A-Za-z0-9_-]{20,}$/.test(key.trim());
+  if (typeof key !== "string") return false;
+  const k = key.trim();
+  return k.length >= 30 && !k.includes("...") && !/\s/.test(k);
 }
 
 type Bloque = Anthropic.ContentBlockParam;
