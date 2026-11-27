@@ -1,6 +1,6 @@
 // Construccion de la OC: funcion PURA. El servidor arma la orden desde el caso y los maestros;
 // el modelo solo elige que solicitud procesar. [TODO: ajustar al mapeo real del PRD (IVA, condiciones de pago...)]
-import { fromMinor, lineaMinor, totalMinor, validarItems } from "./dinero";
+import { fromMinor, lineaMinor, totalMinor } from "./dinero";
 import { fmtCantidad, fmtMonto } from "./formato";
 import { evaluarControles, type ControlCtx } from "./controles";
 import type { CasoSolicitud, CrearOrdenInput, Maestros, ResultadoControl } from "./types";
@@ -12,36 +12,9 @@ export interface OrdenPreparada {
   bloqueante: boolean;
 }
 
-/** Invariantes estructurales de la solicitud (campos vacios, sin lineas). Las cantidades/precios los valida `validarItems`. */
-export function invariantesOrden(caso: CasoSolicitud): string[] {
-  const s = caso.solicitud;
-  const errs: string[] = [];
-  if (s.items.length === 0) errs.push("La solicitud no tiene líneas.");
-  if (!s.proveedorId.trim()) errs.push("La solicitud no indica proveedor.");
-  if (!s.centroCosto.trim()) errs.push("La solicitud no indica centro de costo.");
-  if (!s.moneda.trim()) errs.push("La solicitud no indica moneda.");
-  s.items.forEach((it, i) => {
-    if (!it.descripcion.trim()) errs.push(`Línea ${i + 1}: falta la descripción.`);
-  });
-  return errs;
-}
-
 export function prepararOrden(caso: CasoSolicitud, maestros: Maestros, fecha: string, ctx?: ControlCtx): OrdenPreparada {
   const controles = evaluarControles(caso, maestros, ctx);
-  // Validacion de DATOS (no es una regla de negocio del PRD): invariantes minimos para poder grabar una OC y cantidades/precios
-  // con precision admitida. Se evalua ANTES de abrir la tarjeta: una OC invalida no llega a la persona. Solo aparece si falla.
-  const errPrecision = [...invariantesOrden(caso), ...validarItems(caso.solicitud.items)];
-  if (errPrecision.length) {
-    controles.push({
-      id: "V0",
-      nombre: "Cantidades y precios",
-      descripcion: "Que la solicitud tenga datos mínimos válidos (proveedor, centro de costo, moneda, al menos una línea) y que cantidades (máx. 3 decimales, positivas) y precios (máx. 2 decimales) se graben exactamente como se muestran.",
-      accion: "Corrige las cantidades o precios de la solicitud y vuelve a procesarla.",
-      severidad: "bloqueante",
-      resultado: "FALLA",
-      detalle: errPrecision.join(" "),
-    });
-  }
+  // V0 (validacion de datos) ya viene dentro de `evaluarControles`: aparece solo si falla.
   const bloqueante = controles.some((c) => c.resultado === "FALLA");
   if (bloqueante) return { orden: null, controles, bloqueante };
   const s = caso.solicitud;

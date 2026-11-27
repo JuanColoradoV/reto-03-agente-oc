@@ -14,6 +14,8 @@ export class BusinessError extends Error {
 /** Codigos usados por la logica del agente (el resto son libres). */
 export const CODIGO = {
   CONTROLES_FALLA: "CONTROLES_FALLA",
+  /** La solicitud ya tiene su OC: resultado de negocio neutro, no un incumplimiento. */
+  YA_PROCESADA: "YA_PROCESADA",
   SOLICITUD_NO_ENCONTRADA: "SOLICITUD_NO_ENCONTRADA",
   APROBACION_OBSOLETA: "APROBACION_OBSOLETA",
   ERROR_TECNICO: "ERROR_TECNICO",

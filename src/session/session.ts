@@ -117,6 +117,18 @@ export function recortarAuditoria(audit: SessionState["audit"], max: number): vo
   if (sobran > 0) audit.splice(0, sobran); // solo si no habia suficientes mensajes: se pierde lo mas antiguo
 }
 
+const bytes = (v: unknown): number => new TextEncoder().encode(JSON.stringify(v)).length;
+
+/** Descarta los eventos mas viejos hasta que el arreglo guardado quepa en `max` bytes (la UI solo los usa para repintar el chat). */
+export function acotarEventos(events: UiEvent[], max: number): void {
+  let total = bytes(events);
+  while (total > max && events.length > 1) {
+    const quitados = Math.max(1, Math.floor(events.length / 10));
+    events.splice(0, quitados);
+    total = bytes(events);
+  }
+}
+
 export class Session {
   // Candado del turno: se toma de forma SINCRONA (antes de cualquier await) y se libera siempre al terminar o fallar.
   // La fuente de verdad entre isolates/reinicios es ademas el lease persistido.
@@ -202,6 +214,7 @@ export class Session {
       if (state.messages.length >= CAPS.MESSAGES || state.turns >= CAPS.TURNS) {
         throw new SessionError("sesion_larga", "La conversación es demasiado larga. Inicia una nueva conversación.", 409);
       }
+      if (bytes(state.messages) > CAPS.VALUE_BYTES) throw new SessionError("sesion_larga", "La conversación es demasiado larga. Inicia una nueva conversación.", 409);
       const client = this.client(opts);
       return {
         state,
@@ -278,6 +291,7 @@ export class Session {
       tools: this.env.toolsFor?.(opts) ?? this.env.tools,
       ctx: { sap: new InMemorySap(state.sap), fecha: this.env.fecha(), log: (x) => console.error(JSON.stringify({ traceId, sessionId: this.sessionId, ...x })) },
       persist: async () => {
+        acotarEventos(state.events, CAPS.VALUE_BYTES);
         await this.store.save(state);
         await this.renewLease().catch(() => {});
       },
@@ -304,7 +318,9 @@ export class Session {
 
     clearInterval(heartbeat);
     const u = turn.usage;
-    const usage: TurnUsage = { traceId, calls: u.calls, input: u.input, output: u.output, cacheRead: u.cacheRead, cacheWrite: u.cacheWrite, costUsd: estimateCostUsd(model, u) };
+    // Modo simulado: los tokens los inventa el guion, asi que NO se estima un costo (se reporta 0 y se marca `simulado`).
+    const simulado = opts.mock === true;
+    const usage: TurnUsage = { traceId, calls: u.calls, input: u.input, output: u.output, cacheRead: u.cacheRead, cacheWrite: u.cacheWrite, costUsd: simulado ? 0 : estimateCostUsd(model, u), ...(simulado ? { simulado: true } : {}) };
     const trace: TurnTrace = { traceId, ts: this.env.now(), model, status, iterations: turn.iterations, tools: turn.tools, usage };
     state.trace.push(trace);
     const c = state.costo; // acumuladores de toda la sesion (no se recortan con la traza)
@@ -315,6 +331,7 @@ export class Session {
     c.cacheRead += u.cacheRead;
     c.cacheWrite += u.cacheWrite;
     c.costoUsd += usage.costUsd;
+    if (simulado) c.simulado = true;
     try {
       if (usage.costUsd > 0) await this.env.onSpend?.(usage.costUsd);
     } catch {
@@ -335,13 +352,28 @@ export class Session {
       costUsd: usage.costUsd,
     });
     record({ type: "usage", usage }); // se guarda con el estado ANTES de avisar al cliente (la traza que lea ya incluye este turno)
+    let guardado = true;
     try {
+      acotarEventos(state.events, CAPS.VALUE_BYTES);
       await this.store.save(state);
     } catch (e) {
+      guardado = false;
       console.error(JSON.stringify({ level: "error", traceId, sessionId: this.sessionId, message: `persist: ${e instanceof Error ? e.message : String(e)}` }));
     } finally {
       this.unlock();
       await this.store.clearLease().catch(() => {});
+    }
+    if (!guardado) {
+      // El guardado final fallo: lo que el cliente vio en este turno puede no estar persistido. NO se informa exito: aviso explicito,
+      // estado `error` y sin evento `usage` (la traza guardada no incluye este turno). Los pasos durables anteriores (p. ej. la
+      // decision consumida o la OC creada) se guardaron por separado; recargar muestra el estado real.
+      status = "error";
+      try {
+        await onEvent({ type: "notice", level: "error", text: `No se pudo guardar el resultado de este turno; puede que la conversación no refleje lo último. Recarga la página para ver el estado real. (ref: ${traceId.slice(0, 8)})` });
+      } catch {
+        /* ignorado */
+      }
+      return { status, traceId, usage };
     }
     try {
       await onEvent({ type: "usage", usage }); // un cliente desconectado no importa: ya esta guardado

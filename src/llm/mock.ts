@@ -99,7 +99,7 @@ const fallas = (v: Validacion) => v.controles.filter((c) => c.resultado === "FAL
 function blockedText(id: string, v: Validacion): string {
   const f = fallas(v);
   const dup = f.length === 1 && f[0]!.id === "C0" ? f[0]!.detalle.match(/ya tiene la OC (\d+)/) : null;
-  if (dup) return `La solicitud ${id} ya tiene la OC ${dup[1]}: no se crea otra ni hace falta tu aprobación.\n\nEstado final: **Bloqueada por controles**.`;
+  if (dup) return `La solicitud ${id} ya tiene la OC ${dup[1]}: no se crea otra ni hace falta tu aprobación.\n\nEstado final: **Ya procesada** (OC ${dup[1]}).`;
   const names = f.map((c) => `${c.id} ${c.nombre}`).join(", ");
   return `No creo la orden de ${id}: ${f.length === 1 ? "falló el control" : "fallaron los controles"} ${names}. El detalle y qué corregir están en el aviso de abajo; no se pide tu aprobación.\n\nEstado final: **Bloqueada por controles**.`;
 }

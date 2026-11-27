@@ -1,4 +1,4 @@
-// DISENO (NO CONECTADO: no esta en wrangler.jsonc ni lo importa el Worker): Durable Object con clave `solicitudId` que actua
+// DISENO (NO CONECTADO: no esta en wrangler.jsonc ni lo exporta `src/index.ts`): Durable Object con clave `solicitudId` que actua
 // como candado global y almacen del estado de idempotencia de UNA solicitud (ver idempotencia.ts).
 // Para conectarlo: declarar el binding + migracion en wrangler.jsonc, exportarlo desde src/index.ts y construir
 // `new S4HanaSap({ ..., store: new DoSolicitudStore(env.SOLICITUDES) })`.

@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { hasFile } from "../src/data/repo";
 import { cargarCaso, cargarMaestros } from "../src/domain/casos";
 import { CONTROLES, evaluarControl, matrizMarkdown, type ControlDef } from "../src/domain/controles";
-import { toMinor, totalMinor } from "../src/domain/dinero";
+import { lineaMinor, multiplicarMinor, toMinor, totalMinor } from "../src/domain/dinero";
 import { prepararOrden } from "../src/domain/ordenes";
 import { parseCotizacion, parseMonto } from "../src/domain/parsers/cotizacion";
 import { ejecutarDemo, cargarEsperados } from "../src/demo/run";
@@ -100,7 +100,7 @@ test("rutas del DO: /state restaura el historial, /trace devuelve la traza y /re
 test("política NO_EVALUABLE: bloqueante => FALLA 'No se pudo verificar'; alerta => ALERTA", () => {
   const caso = cargarCaso("sol-000");
   const maestros = cargarMaestros();
-  const base = { descripcion: "d", accion: "a", regla: "r", fuente: "f" };
+  const base = { descripcion: "d", accion: "a", regla: "r", fuente: "f", estado: "t" };
   const bloqueante: ControlDef = { ...base, id: "T1", nombre: "T bloqueante", severidad: "bloqueante", evaluar: () => ({ estado: "NO_EVALUABLE", detalle: "dato ilegible" }) };
   const alerta: ControlDef = { ...base, id: "T2", nombre: "T alerta", severidad: "alerta", evaluar: () => ({ estado: "NO_EVALUABLE", detalle: "dato ilegible" }) };
   const rb = evaluarControl(bloqueante, caso, maestros);
@@ -132,4 +132,36 @@ test("maestros opcionales: se cargan solo si el archivo existe (sin error si fal
   assert.ok(m.proveedores.length > 0);
   const mapa = { centrosCosto: "centros-costo", indicadoresIva: "indicadores-iva", condicionesPago: "condiciones-pago" } as const;
   for (const [clave, archivo] of Object.entries(mapa)) assert.equal(clave in m, hasFile(`maestros/${archivo}.json`), clave);
+});
+
+test("dinero exacto: 0.5 x 0.29 = 0.15 (15 centavos), no 14 por el intermedio binario", () => {
+  assert.equal(lineaMinor({ descripcion: "a", cantidad: 0.5, precioUnitario: 0.29 }), 15);
+  assert.ok(Math.round(0.5 * 0.29 * 100) === 14, "el calculo con floats SI falla: es lo que se evita");
+});
+
+test("dinero exacto: casos borde (half-up, milesimas, ceros, montos grandes, negativos simetricos)", () => {
+  const l = (cantidad: number, precioUnitario: number) => lineaMinor({ descripcion: "x", cantidad, precioUnitario });
+  assert.equal(l(1, 0.1) + l(1, 0.2), 30);
+  assert.equal(l(0.001, 0.5), 0); // 0.0005 -> 0.05 centavo: se redondea a 0
+  assert.equal(l(0.005, 1), 1); // 0.5 centavo exacto -> half-up = 1
+  assert.equal(l(0.003, 1), 0); // 0.3 centavo -> 0
+  assert.equal(l(0.007, 1), 1); // 0.7 centavo -> 1
+  assert.equal(l(1.005, 1), 101); // 100.5 centavos -> 101 (half-up; con floats daria 100)
+  assert.equal(l(3, 0.07), 21);
+  assert.equal(l(0, 99.99), 0);
+  assert.equal(l(10, 0), 0);
+  assert.equal(l(0.1, 0.1), 1); // 0.01 exacto
+  assert.equal(l(1234567.891, 9999999.99), Number((1234567891n * 999999999n + 500n) / 1000n)); // por encima de 2^53 en el producto intermedio
+  assert.equal(multiplicarMinor(-500, 29), -15);
+  assert.equal(multiplicarMinor(-5, 100), -1);
+  assert.equal(multiplicarMinor(2 ** 40, 2 ** 20), Number((BigInt(2 ** 40) * BigInt(2 ** 20) + 500n) / 1000n));
+});
+
+test("dinero exacto: el total es la suma de subtotales redondeados por linea", () => {
+  const items = [
+    { descripcion: "a", cantidad: 0.5, precioUnitario: 0.29 },
+    { descripcion: "b", cantidad: 0.5, precioUnitario: 0.29 },
+    { descripcion: "c", cantidad: 2.5, precioUnitario: 1.15 },
+  ];
+  assert.equal(totalMinor(items), 15 + 15 + 288); // 2.875 -> 288
 });

@@ -6,7 +6,11 @@ import type { OrdenCompra, ResultadoControl } from "../domain/types";
 
 export interface AuditoriaSolicitud {
   solicitudId: string;
-  estado: "OC_CREADA" | "APROBADA_SIN_OC" | "RECHAZADA" | "PENDIENTE_APROBACION" | "BLOQUEADA_O_SIN_PROCESAR";
+  /**
+   * BLOQUEADA: algún control bloqueante dio FALLA (en la validación o en el preflight de crear la OC) y no hubo OC.
+   * SIN_PROCESAR: la solicitud solo se leyó o validó sin FALLA, y nadie pidió ni decidió una OC.
+   */
+  estado: "OC_CREADA" | "APROBADA_SIN_OC" | "RECHAZADA" | "PENDIENTE_APROBACION" | "BLOQUEADA" | "SIN_PROCESAR";
   controles: ResultadoControl[] | null;
   aprobacion: {
     pendingId: string;
@@ -30,10 +34,11 @@ export interface Auditoria {
   solicitudes: AuditoriaSolicitud[];
   /** Llamadas a herramientas que no son de una solicitud concreta (p. ej. listar_solicitudes). */
   otrasLlamadas: { ts: string | null; herramienta: string; ok: boolean | null }[];
-  turnos: { traceId: string; ts: string; status: string; iteraciones: number; herramientas: TurnTrace["tools"]; tokens: { input: number; output: number; cacheRead: number; cacheWrite: number }; costoUsd: number }[];
+  turnos: { traceId: string; ts: string; status: string; iteraciones: number; herramientas: TurnTrace["tools"]; tokens: { input: number; output: number; cacheRead: number; cacheWrite: number }; costoUsd: number; costoSimulado: boolean }[];
   /** Cuántos turnos hay en `turnos` (la traza conserva solo los últimos) frente a los de toda la sesión (`costoTotal.turnos`). */
   turnosMostrados: number;
-  costoTotal: { turnos: number; llamadasModelo: number; input: number; output: number; cacheRead: number; cacheWrite: number; costoUsd: number };
+  /** `costoSimulado`: algún turno fue en modo simulado (MOCK_LLM); sus tokens son inventados y no suman costo (costoUsd = 0 para ellos). */
+  costoTotal: { turnos: number; llamadasModelo: number; input: number; output: number; cacheRead: number; cacheWrite: number; costoUsd: number; costoSimulado: boolean };
 }
 
 const iso = (ms: unknown) => (typeof ms === "number" ? new Date(ms).toISOString() : null);
@@ -43,7 +48,7 @@ export function construirAuditoria(sessionId: string, state: SessionState, ahora
   const porSol = new Map<string, AuditoriaSolicitud>();
   const sol = (id: string): AuditoriaSolicitud => {
     let s = porSol.get(id);
-    if (!s) porSol.set(id, (s = { solicitudId: id, estado: "BLOQUEADA_O_SIN_PROCESAR", controles: null, aprobacion: [], oc: null, llamadasHerramientas: [] }));
+    if (!s) porSol.set(id, (s = { solicitudId: id, estado: "SIN_PROCESAR", controles: null, aprobacion: [], oc: null, llamadasHerramientas: [] }));
     return s;
   };
   const otras: Auditoria["otrasLlamadas"] = [];
@@ -98,7 +103,18 @@ export function construirAuditoria(sessionId: string, state: SessionState, ahora
   }
   for (const s of porSol.values()) {
     const ultima = s.aprobacion[s.aprobacion.length - 1];
-    s.estado = s.oc ? "OC_CREADA" : state.pending && ultima && ultima.pendingId === state.pending.pendingId ? "PENDIENTE_APROBACION" : ultima?.decision === "rechazar" ? "RECHAZADA" : ultima?.decision === "aprobar" ? "APROBADA_SIN_OC" : "BLOQUEADA_O_SIN_PROCESAR";
+    const bloqueada = (s.controles ?? []).some((c) => c.resultado === "FALLA") || s.llamadasHerramientas.some((l) => l.herramienta === "crear_orden_compra" && l.ok === false);
+    s.estado = s.oc
+      ? "OC_CREADA"
+      : state.pending && ultima && ultima.pendingId === state.pending.pendingId
+        ? "PENDIENTE_APROBACION"
+        : ultima?.decision === "rechazar"
+          ? "RECHAZADA"
+          : ultima?.decision === "aprobar"
+            ? "APROBADA_SIN_OC"
+            : bloqueada
+              ? "BLOQUEADA"
+              : "SIN_PROCESAR";
   }
 
   const turnos = state.trace.map((t) => ({
@@ -109,19 +125,48 @@ export function construirAuditoria(sessionId: string, state: SessionState, ahora
     herramientas: t.tools,
     tokens: { input: t.usage.input, output: t.usage.output, cacheRead: t.usage.cacheRead, cacheWrite: t.usage.cacheWrite },
     costoUsd: t.usage.costUsd,
+    costoSimulado: t.usage.simulado === true,
   }));
   // Total de TODA la sesion desde los acumuladores (la traza se recorta a los ultimos turnos).
-  const { turnos: nTurnos, llamadasModelo, input, output, cacheRead, cacheWrite, costoUsd } = state.costo;
-  const costoTotal = { turnos: nTurnos, llamadasModelo, input, output, cacheRead, cacheWrite, costoUsd };
+  const { turnos: nTurnos, llamadasModelo, input, output, cacheRead, cacheWrite, costoUsd, simulado } = state.costo;
+  const costoTotal = { turnos: nTurnos, llamadasModelo, input, output, cacheRead, cacheWrite, costoUsd, costoSimulado: simulado === true };
 
   return {
     sessionId,
     generadoEn: ahora,
-    nota: "Demo sin autenticación: la identidad de quien aprueba/rechaza no se registra (aprobador = null). Los eventos de la sesión tienen tope; el detalle por turno muestra solo los últimos turnos (turnosMostrados); costoTotal suma TODA la sesión. Costo estimado.",
+    nota: "Demo sin autenticación: la identidad de quien aprueba/rechaza no se registra (aprobador = null). Los eventos de la sesión tienen tope; el detalle por turno muestra solo los últimos turnos (turnosMostrados); costoTotal suma TODA la sesión. Costo estimado (en modo simulado el costo es 0 y se marca costoSimulado).",
     solicitudes: [...porSol.values()].sort((a, b) => a.solicitudId.localeCompare(b.solicitudId)),
     otrasLlamadas: otras,
     turnos,
     turnosMostrados: turnos.length,
     costoTotal,
   };
+}
+
+const ETIQUETA_ESTADO: Record<AuditoriaSolicitud["estado"], string> = {
+  OC_CREADA: "OC creada",
+  APROBADA_SIN_OC: "Aprobada sin OC",
+  RECHAZADA: "Rechazada por el aprobador",
+  PENDIENTE_APROBACION: "Pendiente de aprobación",
+  BLOQUEADA: "Bloqueada por controles",
+  SIN_PROCESAR: "Sin procesar",
+};
+
+/** Celda CSV: comillas dobles escapadas y, contra inyección de fórmulas en hojas de cálculo, prefijo `'` si empieza por = + - @ o tabulador. */
+function celdaCsv(v: unknown): string {
+  let t = v === null || v === undefined ? "" : String(v);
+  if (/^[=+\-@\t\r]/.test(t)) t = `'${t}`;
+  return /[",\n\r]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t;
+}
+
+/** Auditoría en CSV (una fila por solicitud) para quien no abre JSON: Excel / Hojas de cálculo. Función pura. */
+export function auditoriaCsv(a: Auditoria): string {
+  const cab = ["solicitud", "estado", "oc", "total", "moneda", "decision", "comentario_o_motivo", "controles", "fecha"];
+  const filas = a.solicitudes.map((s) => {
+    const d = s.aprobacion[s.aprobacion.length - 1];
+    const controles = (s.controles ?? []).map((c) => `${c.id} ${c.resultado}`).join("; ");
+    const fecha = d?.decididaEn ?? s.oc?.fecha ?? d?.solicitadaEn ?? "";
+    return [s.solicitudId, ETIQUETA_ESTADO[s.estado], s.oc?.numero ?? "", s.oc?.total ?? "", s.oc?.moneda ?? "", d?.decision ?? "", d?.comentario ?? "", controles, fecha];
+  });
+  return "\uFEFF" + [cab, ...filas].map((f) => f.map(celdaCsv).join(",")).join("\r\n") + "\r\n";
 }

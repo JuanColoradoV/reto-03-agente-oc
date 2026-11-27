@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { SapError } from "../src/sap/adapter";
-import { MemorySolicitudStore } from "../src/sap/idempotencia";
-import { S4HanaSap } from "../src/sap/s4hana";
+import { SapError } from "../../src/sap/adapter";
+import { MemorySolicitudStore } from "./idempotencia";
+import { S4HanaSap } from "./s4hana";
 
 const input = { solicitudId: "sol-1", proveedorId: "P-1", centroCosto: "CC-1", moneda: "COP", items: [{ descripcion: "Silla", cantidad: 2, precioUnitario: 100 }], total: 200, fecha: "2026-01-15" };
 

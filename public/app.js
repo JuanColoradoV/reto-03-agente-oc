@@ -30,7 +30,7 @@
   const LOW = matchMedia("(max-height: 500px)"); // 400% de zoom: la pagina entera se desplaza
 
   // Vocabulario unico de resultados (paso a paso, lista lateral, tarjetas y texto del agente).
-  const OUTCOME = { creada: "OC creada", bloqueada: "Bloqueada por controles", rechazada: "Rechazada por el aprobador", pendiente: "Pendiente de aprobación" };
+  const OUTCOME = { creada: "OC creada", bloqueada: "Bloqueada por controles", rechazada: "Rechazada por el aprobador", pendiente: "Pendiente de aprobación", yaProcesada: "Ya procesada" };
   // Estado del turno en curso: la tarjeta de resultado se pinta al FINAL del turno, despues del texto del agente.
   const newTurn = () => ({ outcome: null, processing: false, motivo: "" });
   let turn = newTurn();
@@ -128,6 +128,9 @@
   const failures = (controles) => (Array.isArray(controles) ? controles.filter((c) => c.resultado === "FALLA") : []);
   const firstFailText = (controles) => { const f = failures(controles)[0]; return f ? `${f.nombre}: ${f.detalle}` : ""; };
   const isBlockedErr = (o) => typeof o === "string" && o.startsWith("No se puede crear");
+  // "Ya procesada": la solicitud ya tiene su OC. Resultado neutro (informativo), no un incumplimiento ni un bloqueo.
+  const isYaProcesada = (o) => typeof o === "string" && o.startsWith("Ya procesada");
+  const ocDe = (t) => (String(t).match(/OC (\d+)/) || [])[1] || "";
   const isRejected = (o) => typeof o === "string" && o.startsWith("RECHAZADA");
   // Estado de la fila: la EJECUCION de la herramienta es una cosa y el RESULTADO de negocio otra. Para validar_controles
   // el estado sale de los controles (nunca un OK verde junto a una falla).
@@ -135,10 +138,12 @@
     const o = e.output;
     if (!e.ok) {
       if (isRejected(o)) return ["", "✕", OUTCOME.rechazada];
+      if (isYaProcesada(o)) return ["", "ℹ", OUTCOME.yaProcesada];
       if (isBlockedErr(o)) return ["falla", "✕", OUTCOME.bloqueada];
       return ["error", "✕", "Error"];
     }
     if (e.name === "validar_controles" && o && Array.isArray(o.controles)) {
+      if (o.yaProcesada) return ["", "ℹ", `${OUTCOME.yaProcesada} (OC ${o.yaProcesada})`];
       const cnt = (r) => o.controles.filter((x) => x.resultado === r).length;
       const f = cnt("FALLA"), a = cnt("ALERTA");
       const bits = [`${cnt("OK")} OK`];
@@ -153,6 +158,7 @@
   function toolSummary(e) {
     const o = e.output;
     if (!e.ok) {
+      if (isYaProcesada(o)) return "No se creó otra orden";
       if (isRejected(o) || isBlockedErr(o)) return "No se creó la orden";
       const t = typeof o === "string" ? o : "";
       return "No se pudo completar" + (t ? ": " + t.slice(0, 90) : "");
@@ -163,7 +169,7 @@
         const n = 3 + (o.aprobacion ? 1 : 0) + (o.factura ? 1 : 0);
         return `${n} documentos leídos`;
       }
-      case "validar_controles": return o && Array.isArray(o.controles) ? `${o.controles.length} controles revisados` : "Controles revisados";
+      case "validar_controles": return o && o.yaProcesada ? "La solicitud ya tiene su orden" : o && Array.isArray(o.controles) ? `${o.controles.length} controles revisados` : "Controles revisados";
       case "crear_orden_compra": return o && o.numero ? `Número ${o.numero}` : "Orden creada";
       case "listar_solicitudes": { const l = Array.isArray(o) ? o : o && o.solicitudes; return Array.isArray(l) ? `${l.length} solicitudes encontradas` : "Solicitudes encontradas"; }
       case "listar_ordenes": { const l = Array.isArray(o) ? o : o && o.ordenes; return Array.isArray(l) ? `${l.length} órdenes` : "Órdenes encontradas"; }
@@ -195,20 +201,22 @@
     let cur = flow.blockedAt >= 0 ? flow.blockedAt : flow.st.indexOf("run");
     if (cur < 0) cur = Math.max(0, flow.st.lastIndexOf("done"));
     const rejected = flow.outcome === OUTCOME.rechazada;
+    const ya = isYaProcesada(flow.outcome); // resultado informativo: se pinta neutro, como el rechazo
+    const neutral = rejected || ya;
     const top = el("p", "stepper-title", `${flow.sol ? `Solicitud ${flow.sol} · ` : ""}Paso ${cur + 1} de ${STEPS.length}: ${STEPS[cur]}`);
     const ol = el("ol", "stepper-list");
     flow.st.forEach((st, i) => {
-      const li = el("li", "step " + st + (st === "blocked" && rejected ? " rejected" : ""));
-      const dot = el("span", "dot", st === "done" ? "✓" : st === "blocked" ? "✕" : st === "run" ? "" : String(i + 1));
+      const li = el("li", "step " + st + (st === "blocked" && neutral ? " rejected" : ""));
+      const dot = el("span", "dot", st === "done" ? "✓" : st === "blocked" ? (ya ? "i" : "✕") : st === "run" ? "" : String(i + 1));
       dot.setAttribute("aria-hidden", "true");
       const label = el("span", "slabel", STEPS[i]);
-      const sr = el("span", "sr-only", ": " + ({ todo: "pendiente", run: "en curso", done: "hecho", blocked: rejected ? "rechazado" : "bloqueado" })[st]);
+      const sr = el("span", "sr-only", ": " + ({ todo: "pendiente", run: "en curso", done: "hecho", blocked: ya ? "ya procesada" : rejected ? "rechazado" : "bloqueado" })[st]);
       li.append(dot, label, sr);
       if (st === "run") li.setAttribute("aria-current", "step");
       ol.append(li);
     });
     stepper.append(top, ol);
-    if (flow.blockedAt >= 0) stepper.append(el("p", "stepper-stop" + (rejected ? " rejected" : ""), `${flow.outcome} · Detenido en: ${STEPS[flow.blockedAt]}`));
+    if (flow.blockedAt >= 0) stepper.append(el("p", "stepper-stop" + (neutral ? " rejected" : ""), ya ? `${flow.outcome} · No hace falta procesarla de nuevo` : `${flow.outcome} · Detenido en: ${STEPS[flow.blockedAt]}`));
     else if (flow.outcome) stepper.append(el("p", "stepper-now" + (flow.outcome === OUTCOME.creada ? " ok" : ""), flow.outcome));
   }
   function updateFlowCall(e) {
@@ -223,11 +231,12 @@
     if (!mine || (e.name === "validar_controles" && !turn.processing)) return; // una consulta suelta no toca el paso a paso
     if (e.name === "leer_solicitud") flowSet(0, e.ok ? "done" : "blocked", "No se pudieron leer los documentos");
     else if (e.name === "validar_controles" && e.ok && e.output) {
-      if (e.output.aprobable === false) flowSet(1, "blocked", OUTCOME.bloqueada);
+      if (e.output.aprobable === false) flowSet(1, "blocked", e.output.yaProcesada ? OUTCOME.yaProcesada : OUTCOME.bloqueada);
       else flowSet(1, "done");
     } else if (e.name === "crear_orden_compra") {
       if (e.ok) { flowSet(2, "done"); flowSet(3, "done"); }
       else if (isRejected(e.output)) { if (flow.st[2] !== "blocked") flowSet(2, "blocked", OUTCOME.rechazada); }
+      else if (isYaProcesada(e.output)) flowSet(1, "blocked", OUTCOME.yaProcesada);
       else if (isBlockedErr(e.output)) flowSet(1, "blocked", OUTCOME.bloqueada);
       else if (flow.st[3] === "run") flowSet(3, "blocked", "Error al crear la orden en SAP");
     }
@@ -365,7 +374,7 @@
       const det = el("details", "turns");
       det.append(el("summary", "", sum.turns > trace.length ? `Detalle de los últimos ${trace.length} turnos` : "Detalle por turno"));
       const ol = el("ol", "turn-list");
-      trace.forEach((t) => { const u = t.usage; ol.append(el("li", "", `${u.calls} llamada(s) · ${k(u.input)} entrada · ${k(u.output)} salida · caché ${k(u.cacheRead)} leída / ${k(u.cacheWrite)} escrita · ≈ US$ ${u.costUsd.toFixed(4)}`)); });
+      trace.forEach((t) => { const u = t.usage; ol.append(el("li", "", `${u.calls} llamada(s) · ${k(u.input)} entrada · ${k(u.output)} salida · caché ${k(u.cacheRead)} leída / ${k(u.cacheWrite)} escrita · ≈ US$ ${u.costUsd.toFixed(4)}${u.simulado ? " (simulado)" : ""}`)); });
       det.append(ol); box.append(det);
     } catch {
       if (mySeq === traceSeq && myGen === gen && !box.querySelector(".stats")) box.replaceChildren(el("p", "muted small", "No se pudo cargar la traza."));
@@ -422,15 +431,16 @@
     const d = el("details", "tool");
     const s = el("summary");
     const status = pill("run", "spin", "en curso");
-    const ms = el("span", "ms");
+    const ms = el("span", "ms"); // el tiempo va en el detalle tecnico, no en la fila
     const tm = el("time", "tm", clock(e.ts));
     const main = el("span", "tmain");
     const label = el("span", "tlabel", toolLabel(e.name));
     const sum = el("span", "tsum");
-    main.append(label, sum, el("code", "name", e.name));
-    s.append(main, status, ms, tm, el("span", "more", "Ver detalle técnico"));
+    main.append(label, sum); // la fila solo habla en lenguaje de negocio; nombre de la herramienta, entrada, resultado y ms viven en el detalle
+    s.append(main, status, tm, el("span", "more", "Ver detalle técnico"));
     const body = el("div", "body");
-    body.append(el("p", "subh", "Entrada"), el("pre", "", json(e.input)));
+    const tech = el("p", "techline"); tech.append(el("code", "name", e.name), ms);
+    body.append(tech, el("p", "subh", "Entrada"), el("pre", "", json(e.input)));
     d.append(s, body);
     log.append(d);
     toolCards.set(e.id, { d, status, ms, body, name: e.name, label, sum });
@@ -461,12 +471,13 @@
     updateFlowResult(e, sid);
     // Los resultados de negocio se anotan en el turno; la tarjeta se pinta AL FINAL del turno (flushOutcome), despues del texto del agente.
     if (e.name === "validar_controles" && e.ok && e.output && e.output.aprobable === false) {
-      if (!turn.outcome) turn.outcome = { kind: "bloqueada", controles: e.output.controles };
-      setSolStatus(sid, "bloqueada");
+      if (e.output.yaProcesada) { if (!turn.outcome) turn.outcome = { kind: "yaprocesada", numero: e.output.yaProcesada, sol: sid }; setSolStatus(sid, "creada", e.output.yaProcesada); }
+      else { if (!turn.outcome) turn.outcome = { kind: "bloqueada", controles: e.output.controles }; setSolStatus(sid, "bloqueada"); }
     }
     if (e.name === "crear_orden_compra") {
       if (e.ok) { turn.outcome = { kind: "creada", oc: e.recibo || e.output }; setSolStatus(sid || ((e.recibo || e.output) && (e.recibo || e.output).solicitudId), "creada", (e.recibo || e.output) && (e.recibo || e.output).numero); }
       else if (rechazada) { turn.outcome = { kind: "rechazada", motivo: turn.motivo, sol: sid }; setSolStatus(sid, "rechazada"); }
+      else if (isYaProcesada(e.output)) { if (!turn.outcome) turn.outcome = { kind: "yaprocesada", numero: ocDe(e.output), sol: sid }; setSolStatus(sid, "creada", ocDe(e.output)); }
       // "Bloqueada" SOLO por controles en FALLA; un error transitorio (red, SAP, integridad) no pinta la solicitud.
       else if (isBlockedErr(e.output)) { if (!turn.outcome) turn.outcome = { kind: "bloqueada", text: e.output }; setSolStatus(sid, "bloqueada"); }
     }
@@ -480,7 +491,8 @@
     if (o.kind === "creada") addReceipt(o.oc);
     else if (o.kind === "bloqueada") addBlocked(o.controles, o.text);
     else if (o.kind === "rechazada") addRejected(o.motivo);
-    announce(o.kind === "creada" ? OUTCOME.creada : o.kind === "bloqueada" ? OUTCOME.bloqueada : OUTCOME.rechazada);
+    else if (o.kind === "yaprocesada") addYaProcesada(o.numero, o.sol);
+    announce(o.kind === "creada" ? OUTCOME.creada : o.kind === "bloqueada" ? OUTCOME.bloqueada : o.kind === "yaprocesada" ? OUTCOME.yaProcesada : OUTCOME.rechazada);
   }
 
   function addReceipt(oc) {
@@ -524,6 +536,15 @@
     log.append(box); scroll();
   }
 
+  // Resultado neutro: la solicitud ya tiene su OC; no es un incumplimiento, solo informa y no pide nada.
+  function addYaProcesada(numero, sol) {
+    const box = el("section", "rejectbox ya-procesada");
+    box.setAttribute("role", "note");
+    const h = el("h2", "bt"); h.append(pill("", "ℹ", OUTCOME.yaProcesada), document.createTextNode(" No se creó otra orden"));
+    box.append(h, el("p", "bw", `${sol ? `La solicitud ${sol}` : "La solicitud"} ya tiene la OC ${numero || "creada"} en SAP. No hace falta procesarla de nuevo.`));
+    log.append(box); scroll();
+  }
+
   function addRejected(motivo) {
     const box = el("section", "rejectbox");
     box.setAttribute("role", "note");
@@ -541,9 +562,9 @@
     log.append(n); scroll();
   }
 
-  // El costo del turno vive en el panel "Traza y costo"; en el chat solo se muestra si la persona lo activa (apagado por defecto).
+  // El costo del turno vive en "Diagnóstico técnico"; en el chat solo se muestra si la persona lo activa (apagado por defecto).
   function addUsage(u) {
-    log.append(el("div", "usage", `${u.calls} llamada(s) · ${k(u.input)} entrada · ${k(u.output)} salida · caché ${k(u.cacheRead)} leída / ${k(u.cacheWrite)} escrita · ≈ US$ ${u.costUsd.toFixed(4)}`));
+    log.append(el("div", "usage", `${u.calls} llamada(s) · ${k(u.input)} entrada · ${k(u.output)} salida · caché ${k(u.cacheRead)} leída / ${k(u.cacheWrite)} escrita · ≈ US$ ${u.costUsd.toFixed(4)}${u.simulado ? " (simulado)" : ""}`));
     flushOutcome();
     scroll();
     if (!replaying) loadTrace();
@@ -845,6 +866,9 @@
       try {
         pendingId = s.pending ? s.pending.pendingId : null;
         for (const e of s.events) renderEvent(e);
+        // Respaldo: si hay una accion pendiente guardada pero su tarjeta no esta entre los eventos (p. ej. un guardado fallido o
+        // el tope de eventos la descarto), se reconstruye desde `s.pending`: sin ella el chat quedaria bloqueado sin forma de decidir.
+        if (s.pending && !confirmCards.has(s.pending.pendingId)) renderEvent({ type: "pending_confirmation", pending: s.pending });
       } finally { replaying = false; }
       pendingId = s.pending ? s.pending.pendingId : null;
       for (const o of s.ordenes || []) { solStatus.set(o.solicitudId, "creada"); solOc.set(o.solicitudId, o.numero); }
@@ -1032,6 +1056,9 @@
   const auditUrl = () => `/api/sesion/${sessionId}/auditoria`;
   auditLink.href = auditUrl();
   auditLink.addEventListener("click", () => { auditLink.href = auditUrl(); auditLink.download = `auditoria-${sessionId.slice(0, 8)}.json`; });
+  const auditCsv = $("audit-csv");
+  auditCsv.href = `${auditUrl()}.csv`;
+  auditCsv.addEventListener("click", () => { auditCsv.href = `${auditUrl()}.csv`; auditCsv.download = `auditoria-${sessionId.slice(0, 8)}.csv`; });
   clearLog();
   init();
 })();

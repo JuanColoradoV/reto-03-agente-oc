@@ -5,10 +5,11 @@ import { z } from "zod";
 import { executeTool } from "./tools/registry";
 import { ocTools } from "./tools/oc";
 import { InMemorySap } from "./sap";
+import { claveUsable } from "./llm/client";
 import { mockEnabled } from "./llm/mock";
 import { CAPS } from "./agent/state";
 import { MOCK_HEADER } from "./session/routes";
-import { MSG_PRESUPUESTO, parseBudget } from "./budget/ledger";
+import { MSG_PRESUPUESTO, parseBudget, type BudgetNamespace } from "./budget/ledger";
 
 export type Env = {
   ANTHROPIC_API_KEY?: string;
@@ -18,7 +19,7 @@ export type Env = {
   ASSETS: Fetcher;
   SESSIONS: DurableObjectNamespace;
   /** Contador global del gasto diario (opcional; ver src/budget). */
-  BUDGET?: DurableObjectNamespace;
+  BUDGET?: BudgetNamespace;
   /** Tope diario en USD (por defecto 5). */
   DAILY_BUDGET_USD?: string;
   /** Workers Rate Limiting binding (opcional; ver wrangler.jsonc). */
@@ -55,8 +56,9 @@ const rateLimited = (c: Context) => {
 };
 
 // ---- Rate limit por IP: POST y lecturas GET de sesion ----
-// Preferido: binding de Workers Rate Limiting (global y consistente). Respaldo: en memoria por isolate
-// (mejor esfuerzo; sirve en `wrangler dev` y como freno basico si el binding no esta configurado).
+// Preferido: binding de Workers Rate Limiting. Segun la documentacion de Cloudflare es APROXIMADO: los contadores son por
+// ubicacion (cada centro de datos cuenta aparte) y eventualmente consistentes, asi que es un freno de abuso, no una cuota exacta.
+// Respaldo: en memoria por isolate (mejor esfuerzo; sirve en `wrangler dev` y como freno basico si el binding no esta configurado).
 const RATE = { WINDOW_MS: 60_000, MAX: 20, MAX_READ: 120 };
 const hits = new Map<string, number[]>();
 function rateLimitedLocal(key: string, max: number): boolean {
@@ -114,7 +116,7 @@ const forwardRead = async (c: { env: Env; req: { url: string } }, id: string, pa
 };
 const jsonInit = (body: unknown): RequestInit => ({ method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
 
-app.get("/api/health", (c) => c.json({ ok: true, hasApiKey: Boolean(c.env.ANTHROPIC_API_KEY), mock: isMock(c), limits: { mensajeChars: CAPS.MENSAJE_CHARS } }));
+app.get("/api/health", (c) => c.json({ ok: true, hasApiKey: claveUsable(c.env.ANTHROPIC_API_KEY), mock: isMock(c), limits: { mensajeChars: CAPS.MENSAJE_CHARS } }));
 
 // Datos para los botones de accion rapida (sin LLM ni sesion).
 app.get("/api/solicitudes", async (c) => {
@@ -130,8 +132,14 @@ async function presupuestoAgotado(env: Env): Promise<boolean> {
   if (!env.BUDGET) return false;
   try {
     const tope = parseBudget(env.DAILY_BUDGET_USD);
-    const res = await env.BUDGET.get(env.BUDGET.idFromName("global")).fetch(`https://budget/status?tope=${tope}`, { signal: AbortSignal.timeout(3000) });
-    return !((await res.json()) as { permitido: boolean }).permitido;
+    const consulta = env.BUDGET.get(env.BUDGET.idFromName("global")).consultar(tope);
+    let t: ReturnType<typeof setTimeout> | undefined;
+    const espera = new Promise<never>((_, rej) => (t = setTimeout(() => rej(new Error("timeout consultando el presupuesto")), 3000)));
+    try {
+      return !(await Promise.race([consulta, espera])).permitido;
+    } finally {
+      clearTimeout(t);
+    }
   } catch (e) {
     console.error(JSON.stringify({ level: "error", event: "budget_check_failed", message: e instanceof Error ? e.message : String(e) }));
     return false;
@@ -142,7 +150,7 @@ app.post("/api/chat", async (c) => {
   const b = chatBody.safeParse(await c.req.json().catch(() => null));
   if (!b.success) return c.json(err("peticion_invalida", "Cuerpo de la petición inválido."), 400);
   if (b.data.mensaje.length > CAPS.MENSAJE_CHARS) return c.json(err("peticion_invalida", `El mensaje supera el límite de ${CAPS.MENSAJE_CHARS} caracteres.`), 400);
-  if (!c.env.ANTHROPIC_API_KEY && !isMock(c)) {
+  if (!claveUsable(c.env.ANTHROPIC_API_KEY) && !isMock(c)) {
     return c.json(err("missing_api_key", "Falta configurar ANTHROPIC_API_KEY. Defínela en .dev.vars (local) o con `wrangler secret put ANTHROPIC_API_KEY`."), 503);
   }
   // En modo simulado no hay costo: no se consulta el presupuesto.
@@ -174,6 +182,10 @@ app.get("/api/sesion/:id/traza", async (c) => {
 app.get("/api/sesion/:id/auditoria", async (c) => {
   const id = sessionId.safeParse(c.req.param("id"));
   return id.success ? forwardRead(c, id.data, "/auditoria") : c.json(err("peticion_invalida", "Sesión inválida."), 400);
+});
+app.get("/api/sesion/:id/auditoria.csv", async (c) => {
+  const id = sessionId.safeParse(c.req.param("id"));
+  return id.success ? forwardRead(c, id.data, "/auditoria.csv") : c.json(err("peticion_invalida", "Sesión inválida."), 400);
 });
 app.post("/api/sesion/:id/reset", async (c) => {
   const id = sessionId.safeParse(c.req.param("id"));

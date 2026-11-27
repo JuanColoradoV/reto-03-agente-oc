@@ -1,14 +1,14 @@
-// ESQUELETO (NO USADO) de un adaptador SAP real para S/4HANA vía OData V4 `API_PURCHASEORDER_2`.
+// DISEÑO EJECUTABLE (NO CONECTADO) de un adaptador SAP real para S/4HANA vía OData V4 `API_PURCHASEORDER_2`.
 //
 // Por qué V4: para integraciones NUEVAS en S/4HANA Cloud, SAP documenta como deprecado el servicio OData V2
 // `API_PURCHASEORDER_PROCESS_SRV` (desde Public Cloud 2308) y como sucesor el V4 `API_PURCHASEORDER_2` (fuentes en SOLUCION.md).
 // Deprecado no es retirado: para releases on-premise anteriores el fallback es V2 o BAPI_PO_CREATE1 (otro mapeador, no incluido).
 //
-// ESTADO: borrador de diseño que compila y respeta la interfaz `SapAdapter`. NO está conectado: ni `src/session`, ni `demo.ts`
-// lo importan (solo las pruebas, con `fetch` falso), y no hay ningún SAP real al que apuntar. Hacerlo funcionar exige:
+// ESTADO: borrador de diseño que compila y respeta la interfaz `SapAdapter`. NO está conectado: ni el Worker (`src/`), ni `demo.ts`
+// lo importan (solo las pruebas de esta carpeta, con `fetch` falso), y no hay ningún SAP real al que apuntar. Hacerlo funcionar exige:
 //   1. Validar TODOS los nombres de campos/entidades/rutas contra el `$metadata` del sistema real. Lista de lo NO verificado
-//      (escrito de memoria / por analogía con V2): ver CAMPOS_A_VERIFICAR abajo. Solo `PurchaseOrderType` está respaldado
-//      por el ejemplo oficial citado en la revisión (SOLUCION.md).
+//      (escrito por analogía con V2): ver CAMPOS_A_VERIFICAR abajo. Solo `PurchaseOrderType` coincide con el ejemplo
+//      oficial de creación de OC de SAP Help (enlace en SOLUCION.md).
 //   2. Definir con el PRD/consultoría SAP los valores fijos de `S4HanaConfig` (sociedad, org. y grupo de compras, centro, tipo).
 //   3. Resolver autenticación (OAuth2 vía BTP / Cloud Connector). Ya implementado, solo contra un SAP falso: token CSRF con las cookies de sesión del mismo GET,
 //      renovación del token una vez ante 401 y reintento único ante CSRF requerido.
@@ -16,9 +16,10 @@
 //   5. Probar contra un sandbox. Nada de esto se ha ejecutado contra un SAP real.
 //
 // Ver SOLUCION.md > "Diseño del adaptador SAP real" (idempotencia con estados, reintentos, comprobación local vs. simulación real).
-import type { ItemSolicitud, OrdenCompra } from "../domain/types";
-import { canonico, sha256Hex } from "../domain/huella";
-import { SapError, type CrearOrdenInput, type SapAdapter } from "./adapter";
+import { fromMinor, totalMinor } from "../../src/domain/dinero";
+import type { ItemSolicitud, OrdenCompra } from "../../src/domain/types";
+import { canonico, sha256Hex } from "../../src/domain/huella";
+import { SapError, type CrearOrdenInput, type SapAdapter } from "../../src/sap/adapter";
 import type { SolicitudStateStore } from "./idempotencia";
 
 /** Nombres a confirmar en `$metadata` antes de usar el adaptador (todos salvo PurchaseOrderType). */
@@ -416,7 +417,7 @@ export class S4HanaSap implements SapAdapter {
       centroCosto: cc,
       moneda: String(r.DocumentCurrency ?? ""),
       items,
-      total: Math.round(items.reduce((s, i) => s + Math.round(i.cantidad * i.precioUnitario * 100), 0)) / 100,
+      total: fromMinor(totalMinor(items)),
       fecha: odataDate(r.PurchaseOrderDate),
     };
   }

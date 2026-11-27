@@ -327,7 +327,7 @@ async function handleToolUse(
     const pf = await preflightTool(tool, u.input, deps.ctx);
     if (!pf.ok) {
       // Bloqueado o invalido: el error vuelve al modelo; la persona no se entera.
-      turn.tools.push({ name: u.name, ms: 0, ok: false, ...(pf.code === CODIGO.CONTROLES_FALLA ? { bloqueo: "controles" as const } : {}) });
+      turn.tools.push({ name: u.name, ms: 0, ok: false, ...(pf.code === CODIGO.CONTROLES_FALLA ? { bloqueo: "controles" as const } : pf.code === CODIGO.YA_PROCESADA ? { bloqueo: "ya_procesada" as const } : {}) });
       await emit({ type: "tool_result", id: u.id, name: u.name, ok: false, output: pf.error, ms: 0, ...(pf.code ? { code: pf.code } : {}), ...(pf.ref ? { ref: pf.ref } : {}) });
       results.set(u.id, toolResultBlock(u.id, false, pf.error));
     } else if (gated) {

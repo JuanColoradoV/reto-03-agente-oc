@@ -1,0 +1,5 @@
+[DATOS DE EJEMPLO]
+FACTURA F-0042 - Proveedor Demo SAS
+Fecha: 2026-01-05
+4 x Monitor 27 pulgadas @ 800.000
+TOTAL: 3200000 COP

@@ -2,7 +2,7 @@
 // fixtures/reto-03/esperados.json. Lo usan demo.ts (CLI) y tests/.
 import { getJson } from "../data/repo";
 import { cargarCaso, cargarMaestros, listCases } from "../domain/casos";
-import { CONTROLES, matrizMarkdown } from "../domain/controles";
+import { CONTROLES, V0_DATOS, matrizMarkdown } from "../domain/controles";
 import { fmt } from "../domain/dinero";
 import { FECHA_REFERENCIA } from "../domain/constants";
 import type { ResumenControles, Veredicto } from "../domain/types";
@@ -47,7 +47,7 @@ export async function ejecutarDemo(esperados: Esperados = cargarEsperados(), req
   line(`DEMO determinista - fecha de referencia ${FECHA_REFERENCIA} - sin LLM`);
   line();
   line("Matriz de controles (derivada del registro en src/domain/controles):");
-  for (const c of CONTROLES) line(`  ${c.id} [${c.severidad}] ${c.nombre} <- ${c.fuente}`);
+  for (const c of [...CONTROLES, V0_DATOS]) line(`  ${c.id} [${c.severidad}] ${c.nombre} <- ${c.fuente}`);
 
   const ids = listCases();
   if (ids.length === 0) throw new Error("No hay casos en fixtures/reto-03/solicitudes");

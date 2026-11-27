@@ -206,7 +206,9 @@ test("costo: los totales de la sesion no se limitan a los ultimos 50 turnos", as
   assert.equal(a.costoTotal.input, 100 * n); // fakeMessage: 100 de entrada por llamada
   assert.equal(a.costoTotal.output, 50 * n);
   assert.ok(a.costoTotal.costoUsd > a.turnos.reduce((s, t) => s + t.costoUsd, 0));
-  assert.deepEqual(await session.costo(), (await session.auditoria()).costoTotal);
+  const { costoSimulado, ...totalAud } = (await session.auditoria()).costoTotal;
+  assert.equal(costoSimulado, false);
+  assert.deepEqual(await session.costo(), totalAud);
 });
 
 // ---------- 12. Ver documentos ----------

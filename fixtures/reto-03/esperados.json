@@ -2,6 +2,7 @@
   "_placeholder": "RESULTADOS ESPERADOS DE EJEMPLO - reemplazar por la tabla de los 6 casos del PRD. demo.ts falla (exit 1) si algo no coincide.",
   "casos": {
     "sol-000": { "bloqueante": false, "oc": true, "total": 2500000, "controles": { "C1": "OK", "C2": "OK", "C3": "OK", "C4": "OK" } },
+    "sol-00R": { "bloqueante": false, "oc": true, "total": 3200000, "controles": { "C1": "OK", "C2": "OK", "C3": "OK", "C4": "ALERTA" } },
     "sol-00X": { "bloqueante": true, "oc": false, "total": null, "controles": { "C1": "FALLA", "C2": "OK", "C3": "OK", "C4": "OK" } }
   }
 }

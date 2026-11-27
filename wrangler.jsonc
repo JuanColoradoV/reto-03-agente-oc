@@ -23,7 +23,7 @@
   ],
   // Tope diario (USD, costo ESTIMADO sumado de todas las sesiones). Al superarlo /api/chat responde 503. Cambiarlo y redesplegar.
   "vars": { "DAILY_BUDGET_USD": "5" },
-  // Workers Rate Limiting: 20 POST / 60 s y 120 GET de sesion / 60 s por IP (el codigo cae a un limitador en memoria si no existe el binding).
+  // Workers Rate Limiting: 20 POST / 60 s y 120 GET de sesion / 60 s por IP. Es aproximado (por ubicacion, consistencia eventual); el codigo cae a un limitador en memoria si no existe el binding.
   "ratelimits": [
     { "name": "CHAT_LIMITER", "namespace_id": "1001", "simple": { "limit": 20, "period": 60 } },
     // Lecturas GET de sesion (estado/traza): 120 / 60 s por IP.

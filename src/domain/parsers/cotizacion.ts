@@ -4,8 +4,8 @@
 //   COTIZACION 0001 - Proveedor Demo SAS
 //   10 x Silla de oficina ergonomica @ 250.000
 //   TOTAL: 2500000 COP
-// Devuelve lo que pudo leer y la lista de campos que NO pudo (para decidir si usar el fallback LLM,
-// ver src/llm/extract.ts). Es puro: sin IO ni LLM.
+// Devuelve lo que pudo leer y la lista de campos que NO pudo (`noParseados`, que C2 trata como no evaluable y manda a revision
+// humana). Es puro: sin IO ni LLM.
 
 export interface ItemCotizado {
   cantidad: number;

@@ -1,0 +1,4 @@
+[DATOS DE EJEMPLO]
+COTIZACION 0002 - Proveedor Demo SAS
+4 x Monitor 27 pulgadas @ 800.000
+TOTAL: 3200000 COP

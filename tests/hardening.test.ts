@@ -1,4 +1,4 @@
-// Pruebas de endurecimiento (revision Carbon + repro del navegador): idempotencia C0, candado de sesion,
+// Pruebas de endurecimiento: idempotencia C0, candado de sesion,
 // integridad del historial, WYSIWYS, fallo del resumen post-OC, mock/keep-alive/timeout y fecha de negocio.
 import assert from "node:assert/strict";
 import { test } from "node:test";

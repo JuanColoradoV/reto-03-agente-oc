@@ -29,18 +29,21 @@ test("parseBudget: valor valido o el defecto (nunca 'sin tope' por una variable 
   for (const v of [undefined, "", "  ", "abc", "0", "-3", "Infinity"]) assert.equal(parseBudget(v), DEFAULT_DAILY_BUDGET_USD, String(v));
 });
 
-/** Espacio de nombres falso del DO de presupuesto, respaldado por el ledger real. */
+/** Espacio de nombres falso del DO de presupuesto (RPC), respaldado por el ledger real. */
 function fakeBudget(ledger: BudgetLedger, opts: { falla?: boolean } = {}) {
   const peticiones: string[] = [];
   const ns = {
     idFromName: (n: string) => n,
     get: () => ({
-      fetch: async (url: string, init?: RequestInit) => {
-        peticiones.push(`${init?.method ?? "GET"} ${new URL(url).pathname}`);
+      consultar: async (tope: number) => {
+        peticiones.push("consultar");
         if (opts.falla) throw new Error("DO caido");
-        const u = new URL(url);
-        if (u.pathname === "/status") return Response.json(await ledger.consultar(Number(u.searchParams.get("tope"))));
-        return Response.json(await ledger.sumar(Number(JSON.parse(String(init?.body)).usd)));
+        return ledger.consultar(tope);
+      },
+      sumar: async (usd: number) => {
+        peticiones.push("sumar");
+        if (opts.falla) throw new Error("DO caido");
+        return ledger.sumar(usd);
       },
     }),
   };
@@ -50,7 +53,7 @@ function fakeBudget(ledger: BudgetLedger, opts: { falla?: boolean } = {}) {
 function entorno(extra: Partial<Record<string, unknown>>) {
   const reenviadas: string[] = [];
   const env = {
-    ANTHROPIC_API_KEY: "sk-test",
+    ANTHROPIC_API_KEY: "sk-ant-test-0000000000000000000000",
     ASSETS: { fetch: async () => new Response("") },
     SESSIONS: { idFromName: (n: string) => n, get: () => ({ fetch: async (url: string) => (reenviadas.push(new URL(url).pathname), new Response(JSON.stringify({ ok: true }), { headers: { "content-type": "application/json" } })) }) },
     ...extra,

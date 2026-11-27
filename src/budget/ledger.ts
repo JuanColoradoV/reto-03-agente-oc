@@ -47,3 +47,13 @@ export class BudgetLedger {
     return { permitido: e.usd < tope, usd: e.usd, tope, day: e.day };
   }
 }
+
+/** Lo que el Worker y las sesiones usan del DO del presupuesto (RPC). Definido aqui para no depender de "cloudflare:workers" en Node. */
+export interface BudgetRpc {
+  consultar(tope: number): Promise<{ permitido: boolean; usd: number; tope: number; day: string }>;
+  sumar(usd: number): Promise<EstadoPresupuesto>;
+}
+export interface BudgetNamespace {
+  idFromName(name: string): unknown;
+  get(id: unknown): BudgetRpc;
+}

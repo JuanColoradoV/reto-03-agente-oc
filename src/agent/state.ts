@@ -33,8 +33,8 @@ export interface ToolTrace {
   name: string;
   ms: number;
   ok: boolean;
-  /** Si no fue un error tecnico sino un resultado de negocio: bloqueada por controles o rechazada por el aprobador. */
-  bloqueo?: "controles" | "rechazo";
+  /** Si no fue un error tecnico sino un resultado de negocio: bloqueada por controles, ya procesada (la solicitud ya tiene OC) o rechazada por el aprobador. */
+  bloqueo?: "controles" | "rechazo" | "ya_procesada";
 }
 
 export interface TurnTrace {
@@ -42,6 +42,7 @@ export interface TurnTrace {
   ts: string;
   model: string;
   status: string;
+  /** Intentos de llamada al modelo del turno, los fallidos incluidos (el cliente no reintenta por su cuenta: maxRetries 0, así que cada intento es una petición HTTP). */
   iterations: number;
   tools: ToolTrace[];
   usage: TurnUsage;
@@ -56,6 +57,8 @@ export interface CostoAcumulado {
   cacheRead: number;
   cacheWrite: number;
   costoUsd: number;
+  /** true si algún turno de la sesión fue simulado (MOCK_LLM): sus tokens son inventados y no suman costo. */
+  simulado?: boolean;
 }
 export const emptyCosto = (): CostoAcumulado => ({ turnos: 0, llamadasModelo: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, costoUsd: 0 });
 
@@ -82,4 +85,17 @@ export const emptyState = (): SessionState => ({
   costo: emptyCosto(),
 });
 
-export const CAPS = { MESSAGES: 120, TURNS: 60, EVENTS: 400, TRACE: 50, AUDIT: 200, MENSAJE_CHARS: 4000 };
+export const CAPS = {
+  MESSAGES: 120,
+  TURNS: 60,
+  EVENTS: 400,
+  TRACE: 50,
+  AUDIT: 200,
+  MENSAJE_CHARS: 4000,
+  /**
+   * Tope en bytes (JSON) de cada valor que se guarda en el storage del DO. La API KV de un DO con SQLite admite hasta ~8 MB por
+   * clave+valor (la de 128 KiB es del backend KV antiguo, que no usamos: `new_sqlite_classes`); 2 MiB deja un margen amplio y
+   * hace que un exceso se maneje aqui (recortando eventos viejos o cerrando la sesion) en vez de fallar al guardar.
+   */
+  VALUE_BYTES: 2 * 1024 * 1024,
+};

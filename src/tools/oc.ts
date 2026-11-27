@@ -2,7 +2,7 @@
 // [TODO: ajustar descripciones/schemas cuando llegue el PRD; la logica de negocio va en src/domain]
 import { z } from "zod";
 import { cargarCaso, cargarMaestros, listCases } from "../domain/casos";
-import { validarControles } from "../domain/controles";
+import { resumirControles, validarControles } from "../domain/controles";
 import { fmt } from "../domain/dinero";
 import { BusinessError, CODIGO, MSG_APROBACION_OBSOLETA } from "../domain/errores";
 import { huellaAprobacion } from "../domain/huella";
@@ -50,8 +50,16 @@ export const validarControlesTool = defineTool({
   handler: async ({ id }, ctx) => validarControles(cargarCaso(id), cargarMaestros(), await ctxControles(ctx, id)),
 });
 
-const errorControles = (controles: ResultadoControl[]) =>
-  `No se puede crear la OC. Controles en FALLA: ${controles.filter((c) => c.resultado === "FALLA").map((c) => `${c.id} ${c.nombre}: ${c.detalle}`).join(" | ")}`;
+const fallasTxt = (controles: ResultadoControl[]) => controles.filter((c) => c.resultado === "FALLA").map((c) => `${c.id} ${c.nombre}: ${c.detalle}`).join(" | ");
+const errorControles = (controles: ResultadoControl[]) => `No se puede crear la OC. Controles en FALLA: ${fallasTxt(controles)}`;
+/** Si la única falla es C0 (ya existe la OC) el resultado es "Ya procesada": neutro, sin tarjeta de bloqueo roja. */
+const resumen = (controles: ResultadoControl[]) => resumirControles(controles);
+const errorPreflight = (controles: ResultadoControl[]) => {
+  const ya = resumen(controles).yaProcesada;
+  return ya
+    ? { ok: false as const, error: `Ya procesada: la solicitud ya tiene la OC ${ya}; no se crea otra. ${fallasTxt(controles)}`, code: CODIGO.YA_PROCESADA }
+    : { ok: false as const, error: errorControles(controles), code: CODIGO.CONTROLES_FALLA };
+};
 
 export const crearOrdenCompra = defineTool({
   name: "crear_orden_compra",
@@ -76,7 +84,7 @@ export const crearOrdenCompra = defineTool({
     const maestros = cargarMaestros();
     // C0 (OC existente) se evalua contra el SAP de la sesion: si ya hay OC, es FALLA antes de molestar a la persona.
     const prep = prepararOrden(caso, maestros, ctx.fecha, await ctxControles(ctx, solicitudId));
-    if (!prep.orden) return { ok: false, error: errorControles(prep.controles), code: CODIGO.CONTROLES_FALLA };
+    if (!prep.orden) return errorPreflight(prep.controles);
     return {
       ok: true,
       data: { orden: prep.orden },

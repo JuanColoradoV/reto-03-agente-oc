@@ -3,9 +3,9 @@
 // comportamiento DOCUMENTADO que el adaptador debe respetar.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { SapError } from "../src/sap/adapter";
-import { MemorySolicitudStore } from "../src/sap/idempotencia";
-import { S4HanaSap } from "../src/sap/s4hana";
+import { SapError } from "../../src/sap/adapter";
+import { MemorySolicitudStore } from "./idempotencia";
+import { S4HanaSap } from "./s4hana";
 
 const input = { solicitudId: "sol-7", proveedorId: "P-1", centroCosto: "CC-1", moneda: "COP", items: [{ descripcion: "Silla", cantidad: 2, precioUnitario: 1250.5 }, { descripcion: "Mesa", cantidad: 1, precioUnitario: 900 }], total: 3401, fecha: "2026-01-15" };
 const ocCompleta = (num = "4500000009") => ({ PurchaseOrder: num, CorrespncExternalReference: "sol-7", Supplier: "P-1", DocumentCurrency: "COP", PurchaseOrderDate: "2026-01-15", _PurchaseOrderItem: [{ PurchaseOrderItemText: "Silla", OrderQuantity: "2", NetPriceAmount: "1250.50", _PurOrdAccountAssignment: [{ CostCenter: "CC-1" }] }, { PurchaseOrderItemText: "Mesa", OrderQuantity: "1", NetPriceAmount: "900.00", _PurOrdAccountAssignment: [{ CostCenter: "CC-1" }] }] });

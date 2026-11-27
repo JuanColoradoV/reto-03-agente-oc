@@ -1,11 +1,26 @@
 // Dinero en unidades menores enteras (centavos): evita igualdad de floats (0.1 + 0.2 !== 0.3).
 // Los montos "mayores" (los de los fixtures/OC) se convierten con redondeo a 2 decimales.
+// El subtotal de una linea se calcula en ARITMETICA ENTERA EXACTA: cantidad en milesimas (3 decimales) x precio en centavos
+// (2 decimales) se multiplican como BigInt y se dividen entre 1000 con redondeo half-up (away from zero) a centavos. Nunca se
+// multiplican floats (0.5 * 0.29 * 100 da 14.499999999999998 en binario; el resultado correcto es 15 centavos).
 // [TODO: si el PRD define monedas sin decimales o tolerancias de cotizacion, ajustar aqui.]
 import type { ItemSolicitud } from "./types";
 
 export const toMinor = (n: number): number => Math.round(n * 100);
 export const fromMinor = (m: number): number => m / 100;
-export const lineaMinor = (it: ItemSolicitud): number => Math.round(it.cantidad * it.precioUnitario * 100);
+
+/** Cantidad -> milesimas enteras. Los valores validos (<= 3 decimales, ver `validarItems`) son exactos; el resto se redondea. */
+export const cantidadMilesimas = (cantidad: number): number => Math.round(cantidad * 1000);
+
+/** milesimas x centavos / 1000, redondeado half-up (away from zero) a centavos, en BigInt (sin perdida ni desbordes intermedios). */
+export function multiplicarMinor(milesimas: number, centavos: number): number {
+  const prod = BigInt(milesimas) * BigInt(centavos);
+  const abs = prod < 0n ? -prod : prod;
+  const r = (abs + 500n) / 1000n;
+  return Number(prod < 0n ? -r : r);
+}
+
+export const lineaMinor = (it: ItemSolicitud): number => multiplicarMinor(cantidadMilesimas(it.cantidad), toMinor(it.precioUnitario));
 export const totalMinor = (items: ItemSolicitud[]): number => items.reduce((s, it) => s + lineaMinor(it), 0);
 export const fmt = (n: number, moneda: string): string => `${n.toLocaleString("es-CO")} ${moneda}`;
 

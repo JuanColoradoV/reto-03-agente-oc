@@ -3,6 +3,7 @@
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { z } from "zod";
+import { auditoriaCsv } from "./auditoria";
 import { SessionError, type PreparedTurn, type Session, type TurnOpts } from "./session";
 
 /** Cabecera interna que SOLO pone el Worker tras verificar mockEnabled (el Worker nunca copia cabeceras del cliente). */
@@ -72,6 +73,7 @@ export function buildSessionApp(getSession: () => Session, opts: { keepAliveMs?:
   app.get("/state", async (c) => c.json(await getSession().snapshot()));
   app.get("/trace", async (c) => c.json({ trace: await getSession().trace(), costo: await getSession().costo() }));
   app.get("/auditoria", async (c) => c.json(await getSession().auditoria()));
+  app.get("/auditoria.csv", async (c) => c.body(auditoriaCsv(await getSession().auditoria()), 200, { "content-type": "text/csv; charset=utf-8" }));
   app.post("/reset", async (c) => {
     try {
       await getSession().reset();

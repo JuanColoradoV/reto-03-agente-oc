@@ -71,6 +71,8 @@ export interface ResultadoControl {
   severidad: Severidad;
   resultado: Veredicto;
   detalle: string;
+  /** Solo C0: número de la OC que ya existe para la solicitud (resultado de negocio neutro "Ya procesada", no un incumplimiento). */
+  yaProcesada?: string;
 }
 
 export interface ResumenControles {
@@ -79,6 +81,8 @@ export interface ResumenControles {
   alertas: number;
   /** true si no hay ninguna FALLA (las ALERTAs requieren atencion humana pero no bloquean). */
   aprobable: boolean;
+  /** Número de OC si la ÚNICA falla es C0 (la solicitud ya tiene su orden): se presenta como "Ya procesada", no como bloqueo. */
+  yaProcesada?: string;
 }
 
 /** Entrada de SAP para crear una OC. La construye el SERVIDOR (prepararOrden), nunca el modelo. */

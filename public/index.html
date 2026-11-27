@@ -40,7 +40,7 @@
       <p id="composer-hint" class="composer-hint" role="status" hidden></p>
     </main>
 
-    <aside id="side" class="side" aria-label="Solicitudes y traza">
+    <aside id="side" class="side" aria-label="Solicitudes y auditoría">
       <div class="side-head">
         <h2>Solicitudes</h2>
         <button id="drawer-close" class="btn btn-quiet drawer-close" type="button" aria-label="Cerrar panel">Cerrar</button>
@@ -51,13 +51,21 @@
       <p id="sap-help-text" class="sap-help" hidden>Las órdenes que crees viven solo en esta conversación. Al pulsar «Nueva conversación» empiezas con un SAP simulado limpio: las órdenes desaparecen y todas las solicitudes vuelven a estar sin procesar.</p>
       <ul id="quick" class="req-list"></ul>
 
-      <section class="side-section" aria-labelledby="trace-title">
-        <h2 id="trace-title" class="side-title">Traza y costo</h2>
-        <label class="toggle small"><input type="checkbox" id="show-usage"> Mostrar costos en el chat</label>
-        <div id="trace" class="trace"><p class="muted small">Aún sin actividad.</p></div>
-        <a id="audit-link" class="btn btn-quiet audit-link" href="#" download="auditoria.json" title="Controles, aprobaciones con su comentario o motivo, número de OC, herramientas y costo de esta conversación">Descargar auditoría (JSON)</a>
+      <section class="side-section" aria-labelledby="audit-title">
+        <h2 id="audit-title" class="side-title">Auditoría</h2>
+        <p class="muted small">Controles, decisiones con su comentario o motivo y número de OC de esta conversación.</p>
+        <div class="audit-links">
+          <a id="audit-csv" class="btn btn-quiet audit-link" href="#" download="auditoria.csv">Descargar auditoría (CSV)</a>
+          <a id="audit-link" class="btn btn-quiet audit-link" href="#" download="auditoria.json" title="Detalle completo, con herramientas y costo">Descargar auditoría (JSON)</a>
+        </div>
       </section>
-    </aside>
+
+      <details class="side-section diag" id="diag">
+        <summary>Diagnóstico técnico</summary>
+        <label class="toggle small"><input type="checkbox" id="show-usage"> Mostrar tokens y costo en el chat</label>
+        <div id="trace" class="trace"><p class="muted small">Aún sin actividad.</p></div>
+      </details>
+        </aside>
   </div>
   <div id="scrim" class="scrim" hidden></div>
   <div id="sr-reply" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>

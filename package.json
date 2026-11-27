@@ -3,7 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=22.12"
+  },
   "description": "Agente conversacional de ordenes de compra (SAP simulado) - Reto 3",
   "scripts": {
     "bundle": "tsx scripts/bundle-fixtures.ts",
@@ -16,8 +18,10 @@
     "predeploy": "npm run bundle",
     "deploy": "wrangler deploy",
     "pretest": "npm run bundle",
-    "test": "tsx --test tests/*.test.ts",
-    "check": "npm run typecheck && npm test && npm run demo"
+    "test": "tsx --test tests/*.test.ts diseno/sap-real/*.test.ts",
+    "check": "npm run typecheck && npm test && npm run demo",
+    "eval": "tsx scripts/eval.ts",
+    "preeval": "npm run bundle"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.14.0",

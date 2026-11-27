@@ -102,7 +102,7 @@ test("auditoría: GET /api/sesion/:id/auditoria devuelve controles, decisión co
   assert.equal(s0.controles?.length, 5);
   assert.ok(s0.llamadasHerramientas.some((l) => l.herramienta === "crear_orden_compra"));
   const sx = aud.solicitudes.find((s) => s.solicitudId === "sol-00X")!;
-  assert.equal(sx.estado, "BLOQUEADA_O_SIN_PROCESAR");
+  assert.equal(sx.estado, "BLOQUEADA");
   assert.equal(sx.oc, null);
   assert.equal(sx.controles?.find((c) => c.id === "C1")?.resultado, "FALLA");
   assert.ok(aud.turnos.length >= 2);

@@ -71,7 +71,7 @@ test("cliente simulado: con una FALLA bloqueante NO llama a crear_orden_compra; 
   assert.match(txt, /Estado final: \*\*Bloqueada por controles\*\*/);
 });
 
-test("cliente simulado: duplicado (C0) -> Bloqueada por controles, sin crear ni pedir aprobacion", { timeout: 30000 }, async () => {
+test("cliente simulado: duplicado (C0) -> Ya procesada (no es un bloqueo), sin crear ni pedir aprobacion", { timeout: 30000 }, async () => {
   const s = mockSession();
   const first = await collect((on) => s.chat("Procesa la solicitud sol-000", on));
   const pc = first.events.find((e) => e.type === "pending_confirmation");
@@ -82,8 +82,8 @@ test("cliente simulado: duplicado (C0) -> Bloqueada por controles, sin crear ni 
   assert.ok(!events.some((e) => e.type === "pending_confirmation"));
   const txt = said(events);
   assert.match(txt, /4500000001/);
-  assert.match(txt, /Bloqueada por controles/);
-  assert.doesNotMatch(txt, /OC creada/);
+  assert.match(txt, /Ya procesada/);
+  assert.doesNotMatch(txt, /Bloqueada por controles|OC creada/);
 });
 
 test("cliente simulado: rechazo -> 'Rechazada por el aprobador' con el motivo", { timeout: 20000 }, async () => {

@@ -44,4 +44,6 @@ export interface TurnUsage {
   cacheRead: number;
   cacheWrite: number;
   costUsd: number;
+  /** true en modo simulado (MOCK_LLM): los tokens son inventados y el costo se reporta como 0, no como un gasto real. */
+  simulado?: boolean;
 }
