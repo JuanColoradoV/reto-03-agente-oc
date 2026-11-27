@@ -67,7 +67,7 @@ flowchart LR
   - Un modelo más grande no aporta aquí: las decisiones de negocio las toma el código, no el modelo.
 - **Costo estimado por caso:** un caso completo son unas 4 a 6 llamadas al modelo. Con caché activa, cada llamada usa unos 6.000–8.000 tokens de entrada (la mayoría leídos de caché) y unos 300–800 de salida. Con la tarifa configurada en `src/agent/cost.ts`, eso da del orden de **US$ 0,02–0,05 por caso**.
   - El costo real de cada turno se calcula con el `usage` de la API y se ve en el panel "Diagnóstico técnico".
-  - `npm run eval` mide el costo observado con el modelo real.
+  - Medido con el modelo real (`npm run eval:live`, [docs/eval-results.md](./docs/eval-results.md)): **US$ 0,007–0,025 por caso**; los 9 escenarios de evaluación costaron US$ 0,11 en total.
 - **Cambiar de proveedor:** basta con una nueva implementación de `src/llm/adapter.ts`. El modo simulado (`MOCK_LLM=1`) es otra implementación que permite probar la interfaz sin clave.
 
 ## 5. Matriz de controles

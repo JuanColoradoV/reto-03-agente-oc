@@ -50,7 +50,10 @@ Procesa los 6 casos llamando directamente a las herramientas. Por cada caso impr
 ```bash
 npm test            # pruebas: parsers, reglas RC1–RC10, herramientas, ciclo del agente, guardrails, API, módulo
 npm run check       # typecheck + test + demo
+npm run eval:live   # 9 escenarios contra el link público con el modelo REAL -> docs/eval-results.md (~US$ 0,11)
 ```
+
+Última evaluación con el modelo real: **[docs/eval-results.md](./docs/eval-results.md)** (9/9 escenarios correctos, incluidos intentos de saltarse un bloqueo y de auto-confirmar).
 
 ## Archivos generados (`out/`)
 

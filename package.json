@@ -20,7 +20,8 @@
     "deploy": "wrangler deploy",
     "pretest": "npm run bundle",
     "test": "tsx --test tests/*.test.ts",
-    "check": "npm run typecheck && npm test && npm run demo"
+    "check": "npm run typecheck && npm test && npm run demo",
+    "eval:live": "tsx scripts/eval-live.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.14.0",
