@@ -3,6 +3,7 @@
 // el Worker (usa "cloudflare:workers").
 import { DurableObject } from "cloudflare:workers";
 import { Hono } from "hono";
+import { BUDGET_ID } from "../budget/do";
 import { getPrompt } from "../data/repo";
 import { getClient } from "../llm/client";
 import { createMockClient, withLatency } from "../llm/mock";
@@ -14,6 +15,8 @@ import { SessionStore } from "./storage";
 
 export interface DoEnv {
   ANTHROPIC_API_KEY?: string;
+  /** Contador global de gasto diario (opcional: sin el binding no se lleva la cuenta global). */
+  BUDGET?: DurableObjectNamespace;
 }
 
 export { MOCK_HEADER };
@@ -35,6 +38,12 @@ export class SessionDO extends DurableObject<DoEnv> {
       fecha: () => fechaNegocio(new Date()), // dia calendario en America/Bogota (no UTC)
       now: () => new Date().toISOString(),
       log: (e) => console.log(JSON.stringify(e)),
+      // Suma el costo estimado de cada turno al presupuesto global del dia (mejor esfuerzo: un fallo no rompe el turno).
+      onSpend: async (usd) => {
+        const b = this.env.BUDGET;
+        if (!b) return;
+        await b.get(b.idFromName(BUDGET_ID)).fetch("https://budget/add", { method: "POST", body: JSON.stringify({ usd }) });
+      },
     };
     const session = new Session(ctx.id.name ?? ctx.id.toString(), new SessionStore(ctx.storage), sessionEnv);
     this.app = buildSessionApp(() => session);

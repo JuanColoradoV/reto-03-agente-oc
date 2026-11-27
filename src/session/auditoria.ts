@@ -31,7 +31,9 @@ export interface Auditoria {
   /** Llamadas a herramientas que no son de una solicitud concreta (p. ej. listar_solicitudes). */
   otrasLlamadas: { ts: string | null; herramienta: string; ok: boolean | null }[];
   turnos: { traceId: string; ts: string; status: string; iteraciones: number; herramientas: TurnTrace["tools"]; tokens: { input: number; output: number; cacheRead: number; cacheWrite: number }; costoUsd: number }[];
-  costoTotal: { llamadasModelo: number; input: number; output: number; cacheRead: number; cacheWrite: number; costoUsd: number };
+  /** Cuántos turnos hay en `turnos` (la traza conserva solo los últimos) frente a los de toda la sesión (`costoTotal.turnos`). */
+  turnosMostrados: number;
+  costoTotal: { turnos: number; llamadasModelo: number; input: number; output: number; cacheRead: number; cacheWrite: number; costoUsd: number };
 }
 
 const iso = (ms: unknown) => (typeof ms === "number" ? new Date(ms).toISOString() : null);
@@ -108,18 +110,18 @@ export function construirAuditoria(sessionId: string, state: SessionState, ahora
     tokens: { input: t.usage.input, output: t.usage.output, cacheRead: t.usage.cacheRead, cacheWrite: t.usage.cacheWrite },
     costoUsd: t.usage.costUsd,
   }));
-  const costoTotal = state.trace.reduce(
-    (a, t) => ({ llamadasModelo: a.llamadasModelo + t.usage.calls, input: a.input + t.usage.input, output: a.output + t.usage.output, cacheRead: a.cacheRead + t.usage.cacheRead, cacheWrite: a.cacheWrite + t.usage.cacheWrite, costoUsd: a.costoUsd + t.usage.costUsd }),
-    { llamadasModelo: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, costoUsd: 0 },
-  );
+  // Total de TODA la sesion desde los acumuladores (la traza se recorta a los ultimos turnos).
+  const { turnos: nTurnos, llamadasModelo, input, output, cacheRead, cacheWrite, costoUsd } = state.costo;
+  const costoTotal = { turnos: nTurnos, llamadasModelo, input, output, cacheRead, cacheWrite, costoUsd };
 
   return {
     sessionId,
     generadoEn: ahora,
-    nota: "Demo sin autenticación: la identidad de quien aprueba/rechaza no se registra (aprobador = null). Los eventos de la sesión tienen tope; el costo es por turno y total de la sesión, estimado.",
+    nota: "Demo sin autenticación: la identidad de quien aprueba/rechaza no se registra (aprobador = null). Los eventos de la sesión tienen tope; el detalle por turno muestra solo los últimos turnos (turnosMostrados); costoTotal suma TODA la sesión. Costo estimado.",
     solicitudes: [...porSol.values()].sort((a, b) => a.solicitudId.localeCompare(b.solicitudId)),
     otrasLlamadas: otras,
     turnos,
+    turnosMostrados: turnos.length,
     costoTotal,
   };
 }

@@ -65,6 +65,10 @@
   // Avisos cortos para lectores de pantalla (el registro del chat no es una region en vivo).
   const srStatus = $("sr-status");
   const announce = (msg) => { if (replaying || !msg) return; srStatus.textContent = ""; setTimeout(() => { srStatus.textContent = msg; }, 60); };
+  // Ultima respuesta del agente para lectores de pantalla (region en vivo educada). Se actualiza solo con respuestas NUEVAS:
+  // al restaurar la sesion (replaying) no se re-anuncia el historial.
+  const srReply = $("sr-reply");
+  const announceReply = (text) => { if (replaying || !text) return; srReply.textContent = ""; setTimeout(() => { srReply.textContent = "Respuesta del agente: " + text; }, 60); };
   const showBanner = (msg) => { banner.textContent = msg || ""; banner.hidden = !msg; };
   const hint = $("composer-hint");
   const showHint = (msg) => { hint.textContent = msg || ""; hint.hidden = !msg; };
@@ -330,14 +334,17 @@
     try {
       const res = await fetch(`/api/sesion/${sessionId}/traza`, { signal: AbortSignal.timeout(RESTORE_TIMEOUT_MS) });
       if (!res.ok) throw new Error(String(res.status));
-      const { trace } = await res.json();
+      const { trace, costo } = await res.json();
       if (mySeq !== traceSeq || myGen !== gen) return; // respuesta vieja
       box.replaceChildren();
       if (!trace.length) { box.append(el("p", "muted small", "Aún sin actividad.")); return; }
-      const sum = trace.reduce((a, t) => ({ calls: a.calls + t.usage.calls, inp: a.inp + t.usage.input, out: a.out + t.usage.output, cr: a.cr + t.usage.cacheRead, cost: a.cost + t.usage.costUsd }), { calls: 0, inp: 0, out: 0, cr: 0, cost: 0 });
+      // Totales de TODA la sesion (acumuladores del servidor); si faltan, se suma la traza (que solo guarda los ultimos turnos).
+      const sum = costo
+        ? { turns: costo.turnos, calls: costo.llamadasModelo, inp: costo.input + costo.cacheRead + costo.cacheWrite, out: costo.output, cr: costo.cacheRead, cost: costo.costoUsd }
+        : trace.reduce((a, t) => ({ turns: a.turns + 1, calls: a.calls + t.usage.calls, inp: a.inp + t.usage.input + t.usage.cacheRead + t.usage.cacheWrite, out: a.out + t.usage.output, cr: a.cr + t.usage.cacheRead, cost: a.cost + t.usage.costUsd }), { turns: 0, calls: 0, inp: 0, out: 0, cr: 0, cost: 0 });
       const stats = el("dl", "stats");
       const stat = (v, l) => { const r = el("div", "stat"); r.append(el("dt", "", l), el("dd", "", v)); stats.append(r); };
-      stat(trace.length, "Turnos"); stat(sum.calls, "Llamadas al modelo"); stat(`${k(sum.inp)} / ${k(sum.out)}`, "Tokens ent. / sal."); stat(`US$ ${sum.cost.toFixed(4)}`, mock ? "Costo estimado (simulado)" : "Costo estimado");
+      stat(sum.turns, "Turnos"); stat(sum.calls, "Llamadas al modelo"); stat(`${k(sum.inp)} / ${k(sum.out)}`, "Tokens ent. / sal."); stat(`US$ ${sum.cost.toFixed(4)}`, mock ? "Costo estimado (simulado)" : "Costo estimado");
       box.append(stats);
       const agg = new Map();
       for (const t of trace) for (const x of t.tools) { const a = agg.get(x.name) || { n: 0, ms: 0, err: 0, blk: 0 }; a.n++; a.ms += x.ms; if (x.bloqueo) a.blk++; else if (!x.ok) a.err++; agg.set(x.name, a); }
@@ -354,9 +361,9 @@
         }
         tbl.append(tb); box.append(tbl);
       }
-      box.append(el("p", "muted small", `Caché leída ${k(sum.cr)} tokens.`));
+      box.append(el("p", "muted small", `Caché leída ${k(sum.cr)} tokens.` + (sum.turns > trace.length ? ` Los totales cubren los ${sum.turns} turnos de la sesión; el desglose por herramienta y por turno, solo los últimos ${trace.length}.` : "")));
       const det = el("details", "turns");
-      det.append(el("summary", "", "Detalle por turno"));
+      det.append(el("summary", "", sum.turns > trace.length ? `Detalle de los últimos ${trace.length} turnos` : "Detalle por turno"));
       const ol = el("ol", "turn-list");
       trace.forEach((t) => { const u = t.usage; ol.append(el("li", "", `${u.calls} llamada(s) · ${k(u.input)} entrada · ${k(u.output)} salida · caché ${k(u.cacheRead)} leída / ${k(u.cacheWrite)} escrita · ≈ US$ ${u.costUsd.toFixed(4)}`)); });
       det.append(ol); box.append(det);
@@ -427,9 +434,12 @@
     d.append(s, body);
     log.append(d);
     toolCards.set(e.id, { d, status, ms, body, name: e.name, label, sum });
-    if (e.name === "leer_solicitud" || e.name === "crear_orden_compra") turn.processing = true;
-    updateFlowCall(e);
     const sid = e.input && (e.input.solicitudId || e.input.id);
+    if (e.name === "leer_solicitud" || e.name === "crear_orden_compra") turn.processing = true;
+    // "Procésala" tras haber leído la solicitud en un turno anterior: validar_controles sobre la solicitud ya abierta en el paso a
+    // paso (aún sin resultado) es continuación del flujo, no una consulta suelta; si no, el avance y el cuadro de bloqueo se perderían.
+    else if (e.name === "validar_controles" && flow && flow.sol && flow.sol === sid && flow.blockedAt < 0 && !flow.outcome && flow.st[1] !== "done") turn.processing = true;
+    updateFlowCall(e);
     if (typeof sid === "string") toolSol.set(e.id, sid);
     announce(ANNOUNCE_CALL[e.name]);
     scroll();
@@ -455,7 +465,7 @@
       setSolStatus(sid, "bloqueada");
     }
     if (e.name === "crear_orden_compra") {
-      if (e.ok) { turn.outcome = { kind: "creada", oc: e.output }; setSolStatus(sid || (e.output && e.output.solicitudId), "creada", e.output && e.output.numero); }
+      if (e.ok) { turn.outcome = { kind: "creada", oc: e.recibo || e.output }; setSolStatus(sid || ((e.recibo || e.output) && (e.recibo || e.output).solicitudId), "creada", (e.recibo || e.output) && (e.recibo || e.output).numero); }
       else if (rechazada) { turn.outcome = { kind: "rechazada", motivo: turn.motivo, sol: sid }; setSolStatus(sid, "rechazada"); }
       // "Bloqueada" SOLO por controles en FALLA; un error transitorio (red, SAP, integridad) no pinta la solicitud.
       else if (isBlockedErr(e.output)) { if (!turn.outcome) turn.outcome = { kind: "bloqueada", text: e.output }; setSolStatus(sid, "bloqueada"); }
@@ -487,6 +497,11 @@
     row("Fecha", oc.fecha);
     if (oc.total !== undefined) row("Total", fmtMoney(oc.total, oc.moneda));
     r.append(dl);
+    if (Array.isArray(oc.items) && oc.items.length) {
+      const ul = el("ul", "rlines");
+      for (const it of oc.items) ul.append(el("li", "", `${fmtNum(it.cantidad)} × ${it.descripcion} · ${fmtMoney(it.precioUnitario, oc.moneda)} c/u`));
+      r.append(el("h3", "subh", "Líneas compradas"), ul);
+    }
     if (oc.comentarioAprobador) { const q = el("p", "quote"); q.append(el("strong", "", "Comentario del aprobador: "), document.createTextNode(oc.comentarioAprobador)); r.append(q); }
     log.append(r); scroll();
   }
@@ -518,7 +533,13 @@
     log.append(box); scroll();
   }
 
-  function addNotice(e) { log.append(el("div", "notice " + (e.level === "error" ? "error" : ""), e.text)); scroll(); }
+  // Los avisos se anuncian a lectores de pantalla: los errores con role=alert (asertivo), el resto con role=status (educado).
+  // Al restaurar la sesion (replaying) no se asigna rol: el historial no se re-anuncia.
+  function addNotice(e) {
+    const n = el("div", "notice " + (e.level === "error" ? "error" : ""), e.text);
+    if (!replaying) n.setAttribute("role", e.level === "error" ? "alert" : "status");
+    log.append(n); scroll();
+  }
 
   // El costo del turno vive en el panel "Traza y costo"; en el chat solo se muestra si la persona lo activa (apagado por defecto).
   function addUsage(u) {
@@ -526,6 +547,34 @@
     flushOutcome();
     scroll();
     if (!replaying) loadTrace();
+  }
+
+  // "Ver documentos": correo, cotizacion y aprobacion en forma legible (no JSON). Todo con textContent (nada de innerHTML).
+  function documentsSection(d) {
+    const det = el("details", "docs-details");
+    det.append(el("summary", "", "Ver documentos"));
+    const doc = (title, node) => { const sec = el("section", "doc"); sec.append(el("h4", "doc-title", title), node); det.append(sec); };
+    const c = d.correo || {};
+    const mail = el("div", "doc-body");
+    const dl = el("dl", "ledger doc-meta");
+    const row = (kk, v) => { if (v) { const r = el("div"); r.append(el("dt", "", kk), el("dd", "", v)); dl.append(r); } };
+    row("De", c.de); row("Asunto", c.asunto);
+    mail.append(dl);
+    if (c.cuerpo) mail.append(el("p", "doc-text", c.cuerpo));
+    doc("Correo", mail);
+    doc("Cotización", el("p", "doc-text", d.cotizacion || "(vacía)"));
+    const ap = el("div", "doc-body");
+    if (d.aprobacion) {
+      const adl = el("dl", "ledger doc-meta");
+      const LAB = { aprobada: "Aprobada", aprobador: "Aprobador", montoAprobado: "Monto aprobado", fecha: "Fecha" };
+      for (const [kk, v] of Object.entries(d.aprobacion)) {
+        const r = el("div"); r.append(el("dt", "", LAB[kk] || kk), el("dd", "", typeof v === "boolean" ? (v ? "Sí" : "No") : kk === "montoAprobado" ? fmtNum(v) : v)); adl.append(r);
+      }
+      ap.append(adl);
+    } else ap.append(el("p", "muted", "No hay aprobación registrada."));
+    doc("Aprobación", ap);
+    if (d.factura) doc("Factura (previa a la OC)", el("p", "doc-text", d.factura));
+    return det;
   }
 
   function addConfirmation(p) {
@@ -567,17 +616,19 @@
 
       const t = el("table", "lineas");
       const th = el("thead"); const h = el("tr");
-      [["Descripción", ""], ["Cant.", "num"], ["Precio unit.", "num"], ["Subtotal", "num"]].forEach(([x, c]) => { const e1 = el("th", c, x); e1.scope = "col"; h.append(e1); });
+      [["Descripción", ""], ["Cant.", "num"], [`Precio unit. (${v.moneda || "COP"})`, "num"], [`Subtotal (${v.moneda || "COP"})`, "num"]].forEach(([x, c]) => { const e1 = el("th", c, x); e1.scope = "col"; h.append(e1); });
       th.append(h); t.append(th);
       const tb = el("tbody");
       for (const l of v.lineas) {
         const r = el("tr");
-        r.append(el("td", "", l.descripcion), el("td", "num", fmtNum(l.cantidad)), el("td", "num", fmtNum(l.precioUnitario)), el("td", "num", fmtNum(l.subtotal)));
+        r.append(el("td", "", l.descripcion), el("td", "num", l.cantidadTxt ?? fmtNum(l.cantidad)), el("td", "num", l.precioTxt ?? fmtNum(l.precioUnitario)), el("td", "num", l.subtotalTxt ?? fmtNum(l.subtotal)));
         tb.append(r);
       }
       t.append(tb);
       const tw = el("div", "tablewrap"); tw.append(t);
       body.append(el("h3", "subh", "Líneas"), tw);
+
+      if (v.documentos) body.append(documentsSection(v.documentos));
 
       // Controles: resumen de una linea; la tabla se abre sola solo si hay alertas o fallas (cuando todo pasa, no estorba).
       const ctl = Array.isArray(v.controles) ? v.controles : [];
@@ -654,7 +705,7 @@
   function renderEvent(e) {
     switch (e.type) {
       case "user_text": turn = newTurn(); addMsg("user", e.text); break;
-      case "assistant_text": addMsg("assistant", e.text); break;
+      case "assistant_text": addMsg("assistant", e.text); announceReply(e.text); break;
       case "tool_call": addToolCall(e); break;
       case "tool_result": addToolResult(e); break;
       case "pending_confirmation": addConfirmation(e.pending); break;
@@ -668,7 +719,7 @@
   async function readError(res) {
     const data = await res.json().catch(() => null);
     const msg = data?.error?.message || `Error ${res.status}`;
-    if (data?.error?.code === "missing_api_key") showBanner(msg);
+    if (data?.error?.code === "missing_api_key" || data?.error?.code === "presupuesto_diario") showBanner(msg);
     const retryAfter = Number.parseInt(res.headers.get("retry-after") || "", 10);
     return Object.assign(new Error(msg), { http: true, code: data?.error?.code, retryAfter: Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : 60 });
   }
@@ -888,7 +939,7 @@
 
   // ---------- cajon lateral (movil) ----------
   const drawerBtn = $("drawer-toggle"), scrim = $("scrim"), side = $("side");
-  const behind = () => [document.querySelector(".app-head"), $("banner"), document.querySelector(".chat")].filter(Boolean);
+  const behind = () => [document.querySelector(".skip"), document.querySelector(".app-head"), $("banner"), document.querySelector(".chat")].filter(Boolean);
   // Con el cajon abierto el resto de la pagina queda inerte (sin foco ni lectura) y el panel actua como dialogo modal.
   function openDrawer() {
     document.body.classList.add("drawer-open"); scrim.hidden = false; drawerBtn.setAttribute("aria-expanded", "true");
@@ -906,6 +957,15 @@
   $("drawer-close").onclick = closeDrawer;
   scrim.onclick = closeDrawer;
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeDrawer(); });
+  // Trampa de foco: con el cajon abierto, Tab/Shift+Tab circulan SOLO dentro del panel (el resto de la pagina esta inerte).
+  side.addEventListener("keydown", (e) => {
+    if (e.key !== "Tab" || !document.body.classList.contains("drawer-open")) return;
+    const f = [...side.querySelectorAll('a[href], button, input, textarea, select, [tabindex]:not([tabindex="-1"])')].filter((n) => !n.disabled && !n.closest("[hidden]") && n.getClientRects().length > 0);
+    if (!f.length) return;
+    const first = f[0], last = f[f.length - 1];
+    if (e.shiftKey && (document.activeElement === first || !side.contains(document.activeElement))) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && (document.activeElement === last || !side.contains(document.activeElement))) { e.preventDefault(); first.focus(); }
+  });
   matchMedia("(min-width: 901px)").addEventListener("change", (m) => { if (m.matches) releaseDrawer(); });
   SHORT.addEventListener("change", refreshControls);
 

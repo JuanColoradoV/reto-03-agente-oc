@@ -8,6 +8,7 @@ import { InMemorySap } from "./sap";
 import { mockEnabled } from "./llm/mock";
 import { CAPS } from "./agent/state";
 import { MOCK_HEADER } from "./session/routes";
+import { MSG_PRESUPUESTO, parseBudget } from "./budget/ledger";
 
 export type Env = {
   ANTHROPIC_API_KEY?: string;
@@ -16,6 +17,10 @@ export type Env = {
   ENV?: string;
   ASSETS: Fetcher;
   SESSIONS: DurableObjectNamespace;
+  /** Contador global del gasto diario (opcional; ver src/budget). */
+  BUDGET?: DurableObjectNamespace;
+  /** Tope diario en USD (por defecto 5). */
+  DAILY_BUDGET_USD?: string;
   /** Workers Rate Limiting binding (opcional; ver wrangler.jsonc). */
   CHAT_LIMITER?: RateLimit;
   /** Idem para las lecturas GET de sesion (tope mas alto: la UI sondea mientras hay un turno en curso). */
@@ -117,12 +122,33 @@ app.get("/api/solicitudes", async (c) => {
   return r.ok ? c.json({ solicitudes: r.output }) : c.json(err("error_interno", "No se pudieron listar las solicitudes."), 500);
 });
 
+/**
+ * Cortacircuitos de costo: true si el gasto estimado de HOY (todas las sesiones) ya alcanzo el tope. Si el contador no responde
+ * se deja pasar (disponibilidad primero; los topes por sesion y por IP siguen vigentes) y se registra el fallo.
+ */
+async function presupuestoAgotado(env: Env): Promise<boolean> {
+  if (!env.BUDGET) return false;
+  try {
+    const tope = parseBudget(env.DAILY_BUDGET_USD);
+    const res = await env.BUDGET.get(env.BUDGET.idFromName("global")).fetch(`https://budget/status?tope=${tope}`, { signal: AbortSignal.timeout(3000) });
+    return !((await res.json()) as { permitido: boolean }).permitido;
+  } catch (e) {
+    console.error(JSON.stringify({ level: "error", event: "budget_check_failed", message: e instanceof Error ? e.message : String(e) }));
+    return false;
+  }
+}
+
 app.post("/api/chat", async (c) => {
   const b = chatBody.safeParse(await c.req.json().catch(() => null));
   if (!b.success) return c.json(err("peticion_invalida", "Cuerpo de la petición inválido."), 400);
   if (b.data.mensaje.length > CAPS.MENSAJE_CHARS) return c.json(err("peticion_invalida", `El mensaje supera el límite de ${CAPS.MENSAJE_CHARS} caracteres.`), 400);
   if (!c.env.ANTHROPIC_API_KEY && !isMock(c)) {
     return c.json(err("missing_api_key", "Falta configurar ANTHROPIC_API_KEY. Defínela en .dev.vars (local) o con `wrangler secret put ANTHROPIC_API_KEY`."), 503);
+  }
+  // En modo simulado no hay costo: no se consulta el presupuesto.
+  if (!isMock(c) && (await presupuestoAgotado(c.env))) {
+    c.header("Retry-After", "3600");
+    return c.json(err("presupuesto_diario", MSG_PRESUPUESTO), 503);
   }
   return forward(c, b.data.sessionId, "/chat", jsonInit({ mensaje: b.data.mensaje }));
 });

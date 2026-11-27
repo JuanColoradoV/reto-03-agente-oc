@@ -31,6 +31,11 @@ export class InMemorySap implements SapAdapter {
     return oc ? structuredClone(oc) : null;
   }
 
+  async buscarPorSolicitud(solicitudId: string): Promise<OrdenCompra | null> {
+    const oc = this.data.ordenes.find((o) => o.solicitudId === solicitudId);
+    return oc ? structuredClone(oc) : null;
+  }
+
   async listarOrdenes(): Promise<OrdenCompra[]> {
     return this.data.ordenes.map((o) => structuredClone(o));
   }

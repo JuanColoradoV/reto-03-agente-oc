@@ -7,7 +7,10 @@ import type { CasoSolicitud, Maestros, Severidad } from "../types";
 
 /** Contexto transaccional (SAP de la sesion) para controles que no salen solo de los documentos. */
 export interface ControlCtx {
+  /** OC de la solicitud evaluada segun SAP (consulta puntual por referencia; vacio = no hay). undefined = no se pudo consultar. */
   ordenes?: ReadonlyArray<{ solicitudId: string; numero: string }>;
+  /** Fecha de negocio (YYYY-MM-DD) para controles de vigencia del PRD (cotizacion/aprobacion vencida). Ninguno de los provisionales la usa. */
+  fecha?: string;
 }
 
 export interface EvaluacionControl {

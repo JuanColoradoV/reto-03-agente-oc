@@ -218,6 +218,14 @@ table.controles td.res { white-space: nowrap; }
 .field-error { margin: 4px 0 0; font-size: 13px; font-weight: 500; color: var(--bad); }
 .ctrl-details > summary { cursor: pointer; font-size: 13px; font-weight: 500; padding: 4px 0; }
 .ctrl-details[open] > summary { margin-bottom: 6px; }
+.docs-details { margin: 10px 0; }
+.docs-details > summary { cursor: pointer; font-size: 13px; font-weight: 500; padding: 4px 0; }
+.docs-details[open] > summary { margin-bottom: 6px; }
+.docs-details > summary:focus-visible, .ctrl-details > summary:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 4px; }
+.doc { background: var(--code-bg); border: 1px solid var(--border); border-radius: var(--r); padding: 8px 12px; margin: 0 0 8px; }
+.doc-title { margin: 0 0 4px; font-size: 12.5px; font-weight: 600; color: var(--muted); }
+.doc-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13.5px; }
+.doc-meta { margin: 0 0 6px; }
 .gate-actions .btn { min-height: 40px; padding-inline: 18px; }
 .gate-note { font-size: 12px; color: var(--muted); margin: 0 0 0 4px; }
 
@@ -271,6 +279,7 @@ table.controles td.res { white-space: nowrap; }
 /* ---------- OC creada ---------- */
 .receipt { max-width: 520px; background: var(--ok-bg); border: 1px solid color-mix(in srgb, var(--ok) 22%, transparent); border-radius: var(--rc); padding: 16px 20px 18px; box-shadow: var(--shadow); }
 .receipt .rt { margin: 0 0 10px; font-size: 16px; font-weight: 600; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-variant-numeric: tabular-nums; }
+.receipt .rlines { margin: 6px 0 0; padding-left: 18px; font-size: 13.5px; overflow-wrap: anywhere; }
 .receipt .quote { margin: 8px 0 0; font-size: 13.5px; overflow-wrap: anywhere; }
 
 /* ---------- estado vacio ---------- */
@@ -330,4 +339,11 @@ table.controles td.res { white-space: nowrap; }
 }
 @media (max-height: 500px) and (min-width: 901px) {
   .shell { display: grid; }
+}
+
+/* Blancos tactiles: en punteros gruesos (movil/tablet) los controles llegan a 44 px (el minimo de WCAG 2.2 AA es 24 px y ya se cumple). */
+@media (pointer: coarse) {
+  .btn, .head-actions .btn, .restore-notice .btn, .rate-notice .btn, .gate-actions .btn, .gate.resolved .gate-toggle, .audit-link, .empty .actions .btn { min-height: 44px; }
+  .help-btn { width: 44px; height: 44px; }
+  details.tool > summary { min-height: 44px; }
 }

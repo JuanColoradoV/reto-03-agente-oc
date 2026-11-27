@@ -4,6 +4,10 @@ TypeScript + Hono sobre Cloudflare Workers + un Durable Object por sesión de ch
 
 Documento de diseño y decisiones: [SOLUCION.md](./SOLUCION.md) (arquitectura, ciclo del agente, matriz de controles, diseño del adaptador SAP real, análisis de órdenes retroactivas).
 
+![Flujo completo: el agente lee la solicitud, valida 5 controles, pide aprobación con comentario y crea la OC 4500000001 en el SAP simulado](./docs/demo.gif)
+
+*Flujo de punta a punta con un caso de ejemplo (modo simulado): leer documentos → validar controles → aprobación humana → OC creada.*
+
 ## URL pública
 
 (se publica al recibir el PRD)
@@ -31,6 +35,8 @@ npm run check                    # typecheck + test + demo
 npx wrangler login                          # una sola vez: autentica wrangler con tu cuenta de Cloudflare
 npx wrangler secret put ANTHROPIC_API_KEY   # pega la clave cuando la pida (queda como secreto del Worker, nunca en el repo)
 npm run deploy                              # bundle de fixtures + wrangler deploy
+# Tope de gasto diario de la demo publica (USD estimados, todas las sesiones): variable DAILY_BUDGET_USD en wrangler.jsonc (por defecto 5).
+# Al superarlo /api/chat responde 503 "Se alcanzó el límite diario de la demo". Ver SOLUCION.md > Presupuesto global diario.
 ```
 
 La clave local va en `.dev.vars` (ignorado por git). No se versionan secretos.
@@ -86,7 +92,7 @@ Decisiones clave:
 | `src/domain/ordenes.ts` | `prepararOrden(caso, maestros, fecha)` -> `{orden, controles, bloqueante}` y la vista de aprobación |
 | `src/domain/parsers/cotizacion.ts` | Parser determinista (STUB) de `cotizacion.txt` + lista de campos no parseados |
 | `src/domain/dinero.ts` | Dinero en centavos enteros |
-| `src/sap/` | Interfaz `SapAdapter` + `InMemorySap` (demo/tests y estado por sesión); `s4hana.ts` = **esqueleto no conectado** del adaptador real (OData), ver SOLUCION.md |
+| `src/sap/` | Interfaz `SapAdapter` + `InMemorySap` (demo/tests y estado por sesión); `s4hana.ts` = **esqueleto no conectado** del adaptador real (OData V4 `API_PURCHASEORDER_2`), con estado de idempotencia por solicitud, ver SOLUCION.md |
 | `src/agent/` | `loop.ts` (bucle + HITL), `state.ts` (estado de sesión), `events.ts`, `cost.ts` |
 | `src/session/` | `session.ts` (lógica), `storage.ts` (interfaz KV + `MemoryKV`), `routes.ts` (SSE), `auditoria.ts` (informe de auditoría), `do.ts` (Durable Object) |
 | `src/llm/` | Cliente Anthropic y fallback opcional con Haiku (`extract.ts`, nunca usado por la demo) |

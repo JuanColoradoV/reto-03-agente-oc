@@ -3,7 +3,20 @@ export type UiEvent = (
   | { type: "user_text"; text: string }
   | { type: "assistant_text"; text: string }
   | { type: "tool_call"; id: string; name: string; input: unknown }
-  | { type: "tool_result"; id: string; name: string; ok: boolean; output: unknown; ms: number }
+  | {
+      type: "tool_result";
+      id: string;
+      name: string;
+      ok: boolean;
+      /** Detalle tecnico: puede truncarse al guardarlo en la sesion. */
+      output: unknown;
+      ms: number;
+      /** Solo en error: codigo estable y, si fue un error tecnico, referencia para buscar el detalle en el log del servidor. */
+      code?: string;
+      ref?: string;
+      /** Recibo estructurado y pequeno (nunca se trunca): la UI lo usa para pintar el recibo tras recargar. */
+      recibo?: unknown;
+    }
   | { type: "pending_confirmation"; pending: PendingView }
   | { type: "decision"; pendingId: string; decision: "aprobar" | "rechazar"; comentario?: string }
   | { type: "notice"; level: "info" | "warn" | "error"; text: string }

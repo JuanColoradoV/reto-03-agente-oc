@@ -14,6 +14,8 @@ export interface PendingAction {
   input: unknown;
   /** `data` del preflight determinista (lo que se ejecutara si se aprueba). */
   preflight: unknown;
+  /** Huella de lo que vio la persona (OC + controles + documentos). Al confirmar se re-ejecuta el preflight y debe coincidir. */
+  huella?: string;
   view: PendingView;
   /** tool_use ids del turno, en orden, y los resultados ya calculados de las demas tools del mismo turno. */
   order: string[];
@@ -23,7 +25,7 @@ export interface PendingAction {
 
 export interface AuditEntry {
   ts: string;
-  type: "mensaje" | "pending_creado" | "decision" | "tool_ejecutada" | "turno_error";
+  type: "mensaje" | "pending_creado" | "decision" | "tool_ejecutada" | "turno_error" | "aprobacion_invalidada";
   [k: string]: unknown;
 }
 
@@ -45,6 +47,18 @@ export interface TurnTrace {
   usage: TurnUsage;
 }
 
+/** Totales de toda la sesion, independientes de la traza (que se recorta a CAPS.TRACE turnos). */
+export interface CostoAcumulado {
+  turnos: number;
+  llamadasModelo: number;
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  costoUsd: number;
+}
+export const emptyCosto = (): CostoAcumulado => ({ turnos: 0, llamadasModelo: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, costoUsd: 0 });
+
 export interface SessionState {
   messages: Message[];
   pending: PendingAction | null;
@@ -53,6 +67,8 @@ export interface SessionState {
   events: UiEvent[];
   trace: TurnTrace[];
   turns: number;
+  /** Acumuladores de costo de TODA la sesion (la traza solo conserva los ultimos CAPS.TRACE turnos). */
+  costo: CostoAcumulado;
 }
 
 export const emptyState = (): SessionState => ({
@@ -63,6 +79,7 @@ export const emptyState = (): SessionState => ({
   events: [],
   trace: [],
   turns: 0,
+  costo: emptyCosto(),
 });
 
 export const CAPS = { MESSAGES: 120, TURNS: 60, EVENTS: 400, TRACE: 50, AUDIT: 200, MENSAJE_CHARS: 4000 };

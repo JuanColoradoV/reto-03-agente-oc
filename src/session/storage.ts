@@ -1,6 +1,6 @@
 // Almacenamiento del estado de sesion detras de una interfaz minima (la de DurableObjectStorage:
 // get(keys[]) / put(obj) atomico / deleteAll). Asi la logica se prueba con MemoryKV sin Workers.
-import { emptyState, type SessionState } from "../agent/state";
+import { emptyCosto, emptyState, type SessionState } from "../agent/state";
 
 export interface KVStorage {
   get<T = unknown>(keys: string[]): Promise<Map<string, T>>;
@@ -28,7 +28,21 @@ export class MemoryKV implements KVStorage {
   }
 }
 
-const KEYS = ["messages", "pending", "sap", "audit", "events", "trace", "turns"] as const;
+function costoDesdeTraza(trace: SessionState["trace"] | undefined): SessionState["costo"] {
+  const c = emptyCosto();
+  for (const t of trace ?? []) {
+    c.turnos++;
+    c.llamadasModelo += t.usage.calls;
+    c.input += t.usage.input;
+    c.output += t.usage.output;
+    c.cacheRead += t.usage.cacheRead;
+    c.cacheWrite += t.usage.cacheWrite;
+    c.costoUsd += t.usage.costUsd;
+  }
+  return c;
+}
+
+const KEYS = ["messages", "pending", "sap", "audit", "events", "trace", "turns", "costo"] as const;
 
 export class SessionStore {
   constructor(private kv: KVStorage) {}
@@ -44,6 +58,8 @@ export class SessionStore {
       events: (got.get("events") as SessionState["events"]) ?? base.events,
       trace: (got.get("trace") as SessionState["trace"]) ?? base.trace,
       turns: (got.get("turns") as number) ?? 0,
+      // Sesiones guardadas antes de existir el acumulador: se parte de la traza disponible (mejor aproximacion).
+      costo: (got.get("costo") as SessionState["costo"]) ?? costoDesdeTraza(got.get("trace") as SessionState["trace"] | undefined),
     };
   }
 
@@ -57,6 +73,7 @@ export class SessionStore {
       events: s.events,
       trace: s.trace,
       turns: s.turns,
+      costo: s.costo,
     });
   }
 

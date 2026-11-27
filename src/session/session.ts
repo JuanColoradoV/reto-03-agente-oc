@@ -47,6 +47,10 @@ export interface SessionEnv {
   leaseMs?: number;
   /** Tope por llamada al modelo (ms). Por defecto LIMITS.MODEL_TIMEOUT_MS. */
   modelTimeoutMs?: number;
+  /** Tope del turno completo (ms). Por defecto LIMITS.TURN_TIMEOUT_MS. */
+  turnTimeoutMs?: number;
+  /** Se llama al terminar cada turno con su costo estimado (USD): alimenta el presupuesto global diario. Nunca debe lanzar. */
+  onSpend?(usd: number): Promise<void> | void;
 }
 
 export const LEASE_MS = 75_000;
@@ -74,11 +78,43 @@ export interface SessionSnapshot {
 
 type TurnBody = (deps: LoopDeps, turn: ReturnType<typeof newTurn>, emit: Emit) => Promise<TurnStatus>;
 
-/** Recorta salidas enormes de tools antes de guardarlas en el historial de eventos. */
-function compactEvent(e: UiEvent): UiEvent {
+const MAX_EVENT_OUTPUT = 6000;
+const MAX_CAMPO_TEXTO = 1500;
+
+/** Copia con los textos largos recortados y la estructura (claves, arreglos, numeros) intacta. */
+function recortarTextos(v: unknown): unknown {
+  if (typeof v === "string") return v.length > MAX_CAMPO_TEXTO ? v.slice(0, MAX_CAMPO_TEXTO) + "… [truncado]" : v;
+  if (Array.isArray(v)) return v.map(recortarTextos);
+  if (v && typeof v === "object") return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, recortarTextos(x)]));
+  return v;
+}
+
+/**
+ * Recorta salidas enormes de tools antes de guardarlas en el historial de eventos. Un `output` ESTRUCTURADO (p. ej. controles de
+ * validar_controles) nunca se convierte en texto: se recortan solo sus cadenas largas, para que al recargar la UI y la auditoria
+ * sigan leyendo la misma forma (si fuera una cadena, un caso bloqueado se pintaria como "Listo").
+ */
+export function compactEvent(e: UiEvent): UiEvent {
+  // Solo se trunca el detalle tecnico (`output`); el recibo estructurado (`recibo`) viaja intacto.
   if (e.type !== "tool_result") return e;
   const s = typeof e.output === "string" ? e.output : JSON.stringify(e.output);
-  return s.length > 6000 ? { ...e, output: s.slice(0, 6000) + "… [truncado]" } : e;
+  if (s.length <= MAX_EVENT_OUTPUT) return e;
+  if (typeof e.output === "string") return { ...e, output: s.slice(0, MAX_EVENT_OUTPUT) + "… [truncado]" };
+  const compacto = recortarTextos(e.output);
+  return JSON.stringify(compacto).length <= MAX_EVENT_OUTPUT * 2 ? { ...e, output: compacto } : { ...e, output: s.slice(0, MAX_EVENT_OUTPUT) + "… [truncado]" };
+}
+
+/** Recorta el registro de auditoria a CAPS.AUDIT: primero se descartan los `mensaje` mas viejos (ruido); las decisiones y OC se conservan. */
+export function recortarAuditoria(audit: SessionState["audit"], max: number): void {
+  let sobran = audit.length - max;
+  if (sobran <= 0) return;
+  for (let i = 0; i < audit.length && sobran > 0; ) {
+    if (audit[i]!.type === "mensaje") {
+      audit.splice(i, 1);
+      sobran--;
+    } else i++;
+  }
+  if (sobran > 0) audit.splice(0, sobran); // solo si no habia suficientes mensajes: se pierde lo mas antiguo
 }
 
 export class Session {
@@ -174,11 +210,12 @@ export class Session {
         body: async (deps, turn, emit) => {
           state.turns++;
           sanitizeHistory(state); // cierra tool_use huerfanos y fusiona `user` consecutivos ANTES del nuevo mensaje
+          const rollbackTo = [...state.messages]; // copia superficial valida: los mensajes nunca se mutan, solo se reemplazan o agregan
           appendUserText(state, text);
           state.audit.push({ ts: this.env.now(), type: "mensaje", chars: text.length, traceId: turn.traceId });
           await emit({ type: "user_text", text });
           await deps.persist();
-          return runAgentLoop(deps, state, turn, emit);
+          return runAgentLoop(deps, state, turn, emit, { rollbackTo });
         },
       };
     });
@@ -239,7 +276,7 @@ export class Session {
       client,
       systemPrompt: this.env.systemPrompt,
       tools: this.env.toolsFor?.(opts) ?? this.env.tools,
-      ctx: { sap: new InMemorySap(state.sap), fecha: this.env.fecha() },
+      ctx: { sap: new InMemorySap(state.sap), fecha: this.env.fecha(), log: (x) => console.error(JSON.stringify({ traceId, sessionId: this.sessionId, ...x })) },
       persist: async () => {
         await this.store.save(state);
         await this.renewLease().catch(() => {});
@@ -247,7 +284,12 @@ export class Session {
       now: () => this.env.now(),
       model,
       ...(this.env.modelTimeoutMs ? { modelTimeoutMs: this.env.modelTimeoutMs } : {}),
+      ...(this.env.turnTimeoutMs !== undefined ? { turnTimeoutMs: this.env.turnTimeoutMs } : {}),
     };
+
+    // Heartbeat del lease: una llamada al modelo puede durar mas que el lease (hasta MODEL_TIMEOUT_MS). Mientras ESTE proceso
+    // sigue vivo y ejecutando el turno, se renueva; si muere, el lease caduca solo y la sesion se libera.
+    const heartbeat = setInterval(() => void this.renewLease().catch(() => {}), Math.max(10, (this.env.leaseMs ?? LEASE_MS) / 3));
 
     let status: TurnResult["status"] = "done";
     try {
@@ -260,12 +302,26 @@ export class Session {
       await emit({ type: "notice", level: "error", text: `No se pudo completar la solicitud. Intenta de nuevo. (ref: ${traceId.slice(0, 8)})` });
     }
 
+    clearInterval(heartbeat);
     const u = turn.usage;
     const usage: TurnUsage = { traceId, calls: u.calls, input: u.input, output: u.output, cacheRead: u.cacheRead, cacheWrite: u.cacheWrite, costUsd: estimateCostUsd(model, u) };
     const trace: TurnTrace = { traceId, ts: this.env.now(), model, status, iterations: turn.iterations, tools: turn.tools, usage };
     state.trace.push(trace);
+    const c = state.costo; // acumuladores de toda la sesion (no se recortan con la traza)
+    c.turnos++;
+    c.llamadasModelo += u.calls;
+    c.input += u.input;
+    c.output += u.output;
+    c.cacheRead += u.cacheRead;
+    c.cacheWrite += u.cacheWrite;
+    c.costoUsd += usage.costUsd;
+    try {
+      if (usage.costUsd > 0) await this.env.onSpend?.(usage.costUsd);
+    } catch {
+      /* el contador global es de mejor esfuerzo: no rompe el turno */
+    }
     if (state.trace.length > CAPS.TRACE) state.trace.splice(0, state.trace.length - CAPS.TRACE);
-    if (state.audit.length > CAPS.AUDIT) state.audit.splice(0, state.audit.length - CAPS.AUDIT);
+    recortarAuditoria(state.audit, CAPS.AUDIT);
     this.env.log({
       level: "info",
       event: "turn",
@@ -303,6 +359,11 @@ export class Session {
 
   async trace(): Promise<TurnTrace[]> {
     return (await this.store.load()).trace;
+  }
+
+  /** Totales de toda la sesion (independientes de la traza recortada). */
+  async costo(): Promise<SessionState["costo"]> {
+    return (await this.store.load()).costo;
   }
 
   async auditoria(): Promise<Auditoria> {

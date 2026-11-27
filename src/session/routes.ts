@@ -70,7 +70,7 @@ export function buildSessionApp(getSession: () => Session, opts: { keepAliveMs?:
   });
 
   app.get("/state", async (c) => c.json(await getSession().snapshot()));
-  app.get("/trace", async (c) => c.json({ trace: await getSession().trace() }));
+  app.get("/trace", async (c) => c.json({ trace: await getSession().trace(), costo: await getSession().costo() }));
   app.get("/auditoria", async (c) => c.json(await getSession().auditoria()));
   app.post("/reset", async (c) => {
     try {

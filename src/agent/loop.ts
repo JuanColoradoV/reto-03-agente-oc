@@ -5,6 +5,7 @@
 //   pendiente (con los datos del preflight) y se espera una decision que solo vale una vez.
 // - Nunca se deja un tool_use sin su tool_result en el historial.
 import type Anthropic from "@anthropic-ai/sdk";
+import { MSG_APROBACION_OBSOLETA, CODIGO } from "../domain/errores";
 import { MODEL_AGENT } from "../llm/client";
 import { executeTool, preflightTool, toAnthropicTools, type ToolContext, type ToolDef } from "../tools/registry";
 import type { PendingView, UiEvent } from "./events";
@@ -12,11 +13,13 @@ import type { RawUsage } from "./cost";
 import type { Message, PendingAction, SessionState, ToolTrace } from "./state";
 
 export const LIMITS = {
-  MAX_ITERATIONS: 8, // llamadas al modelo por turno (el resumen final sin herramientas es una mas)
+  MAX_ITERATIONS: 8, // llamadas REALES al modelo por turno, reintentos incluidos (la ultima va sin herramientas: resumen final)
   MAX_TOKENS: 8192, // Sonnet 5.5 piensa por defecto: el razonamiento cuenta como salida
   MAX_TOKENS_RETRY: 16000, // reintento unico si se corta con un tool_use a medias
-  MAX_TOTAL_OUTPUT_TOKENS: 40000, // tope acumulado por turno
+  MAX_TOTAL_OUTPUT_TOKENS: 40000, // tope acumulado por turno (se calcula el saldo antes de CADA llamada, reintento incluido)
+  MIN_CALL_TOKENS: 256, // con menos saldo que esto no se llama al modelo (una respuesta asi de corta no sirve)
   MODEL_TIMEOUT_MS: 120_000, // tope por llamada al modelo (AbortSignal)
+  TURN_TIMEOUT_MS: 240_000, // tope del turno completo: una racha de llamadas lentas no puede retener la sesion indefinidamente
 };
 
 /** Cliente minimo que usa el bucle: el SDK real lo cumple y las pruebas inyectan un falso. */
@@ -35,10 +38,14 @@ export interface LoopDeps {
   model?: string;
   /** Tope por llamada al modelo (ms). Por defecto LIMITS.MODEL_TIMEOUT_MS. */
   modelTimeoutMs?: number;
+  /** Tope del turno completo (ms). Por defecto LIMITS.TURN_TIMEOUT_MS. */
+  turnTimeoutMs?: number;
 }
 
 export interface TurnAcc {
   traceId: string;
+  /** epoch ms de inicio del turno (para el tope TURN_TIMEOUT_MS). */
+  startedAt: number;
   iterations: number;
   usage: RawUsage & { calls: number };
   tools: ToolTrace[];
@@ -46,6 +53,7 @@ export interface TurnAcc {
 
 export const newTurn = (traceId: string): TurnAcc => ({
   traceId,
+  startedAt: Date.now(),
   iterations: 0,
   usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, calls: 0 },
   tools: [],
@@ -126,6 +134,9 @@ async function callModel(
   toolChoice: Anthropic.ToolChoice,
 ): Promise<Anthropic.Message> {
   turn.iterations++;
+  // Cada llamada se acota por el timeout del modelo Y por lo que queda del turno.
+  const restanteTurno = turn.startedAt + (deps.turnTimeoutMs ?? LIMITS.TURN_TIMEOUT_MS) - Date.now();
+  if (restanteTurno <= 0) throw new Error("El turno superó su tiempo máximo.");
   const res = await deps.client.messages.create(
     {
       model: deps.model ?? MODEL_AGENT,
@@ -136,7 +147,7 @@ async function callModel(
       output_config: { effort: "medium" },
       messages: withMessageCache(state.messages),
     },
-    { signal: AbortSignal.timeout(deps.modelTimeoutMs ?? LIMITS.MODEL_TIMEOUT_MS) },
+    { signal: AbortSignal.timeout(Math.min(deps.modelTimeoutMs ?? LIMITS.MODEL_TIMEOUT_MS, restanteTurno)) },
   );
   turn.usage.calls++;
   turn.usage.input += res.usage.input_tokens;
@@ -146,9 +157,26 @@ async function callModel(
   return res;
 }
 
+/** Saldo de tokens de salida del turno: ningun max_tokens puede superarlo. */
+const restante = (turn: TurnAcc): number => Math.max(0, LIMITS.MAX_TOTAL_OUTPUT_TOKENS - turn.usage.output);
+
 const AUTO: Anthropic.ToolChoice = { type: "auto", disable_parallel_tool_use: true };
 
-export async function runAgentLoop(deps: LoopDeps, state: SessionState, turn: TurnAcc, emit: Emit): Promise<TurnStatus> {
+export interface LoopOpts {
+  /**
+   * Turno posterior a una decision humana: solo se redacta el resumen final (tool_choice none, sin herramientas). Lo que
+   * hacia falta ya esta en el historial (resultado de la accion); permitir mas acciones aqui abriria un camino para que un
+   * texto inyectado en los documentos encadene otra accion justo despues de aprobar o rechazar.
+   */
+  soloResumen?: boolean;
+  /** Historial anterior al mensaje del usuario de este turno: si el contexto se desborda, se restaura (el mensaje se descarta). */
+  rollbackTo?: Message[];
+}
+
+/** Bloques de razonamiento (sin texto visible ni tool_use): un max_tokens que solo produjo esto no sirve de respuesta. */
+const sinContenidoUtil = (content: Anthropic.ContentBlock[]) => !content.some((b) => (b.type === "text" && b.text.trim()) || b.type === "tool_use");
+
+export async function runAgentLoop(deps: LoopDeps, state: SessionState, turn: TurnAcc, emit: Emit, opts: LoopOpts = {}): Promise<TurnStatus> {
   const tools = toAnthropicTools(deps.tools);
   sanitizeHistory(state);
 
@@ -159,17 +187,29 @@ export async function runAgentLoop(deps: LoopDeps, state: SessionState, turn: Tu
   };
   const notice = (level: "info" | "warn" | "error", text: string) => emit({ type: "notice", level, text });
 
-  for (let i = 0; i < LIMITS.MAX_ITERATIONS; i++) {
-    if (turn.usage.output >= LIMITS.MAX_TOTAL_OUTPUT_TOKENS) {
+  // Presupuesto de llamadas REALES (los reintentos cuentan). Con soloResumen: el resumen y, si se corta razonando, un reintento.
+  const maxCalls = opts.soloResumen ? 2 : LIMITS.MAX_ITERATIONS;
+  let llamadas = 0;
+  /** La ultima llamada del presupuesto (o cualquiera en soloResumen) va sin herramientas: resumen final. */
+  const eleccion = (): Anthropic.ToolChoice => (opts.soloResumen || llamadas >= maxCalls - 1 ? { type: "none" } : AUTO);
+  const llamar = async (maxTokens: number, choice: Anthropic.ToolChoice) => {
+    llamadas++;
+    return callModel(deps, state, turn, tools, maxTokens, choice);
+  };
+
+  while (llamadas < maxCalls) {
+    if (restante(turn) < LIMITS.MIN_CALL_TOKENS) {
       await notice("warn", "Se alcanzó el límite de tokens de este turno.");
       return "done";
     }
-    // Ultima iteracion: resumen final SIN herramientas (tool_choice none; las definiciones deben seguir presentes).
-    const ultima = i === LIMITS.MAX_ITERATIONS - 1;
-    const choice: Anthropic.ToolChoice = ultima ? { type: "none" } : AUTO;
-    let res = await callModel(deps, state, turn, tools, LIMITS.MAX_TOKENS, choice);
-    if (res.stop_reason === "max_tokens" && toolUses(res.content).length > 0) {
-      res = await callModel(deps, state, turn, tools, LIMITS.MAX_TOKENS_RETRY, choice);
+    const ultima = opts.soloResumen || llamadas >= maxCalls - 1;
+    const primero = Math.min(LIMITS.MAX_TOKENS, restante(turn));
+    let res = await llamar(primero, eleccion());
+    // max_tokens: con un tool_use a medias O con solo razonamiento (thinking consumio el presupuesto antes de producir nada)
+    // se reintenta UNA vez con mas margen, si cabe en el saldo y en el presupuesto de llamadas.
+    if (res.stop_reason === "max_tokens" && (toolUses(res.content).length > 0 || sinContenidoUtil(res.content)) && llamadas < maxCalls) {
+      const reintento = Math.min(LIMITS.MAX_TOKENS_RETRY, restante(turn));
+      if (reintento > primero) res = await llamar(reintento, eleccion());
     }
 
     switch (res.stop_reason) {
@@ -186,14 +226,20 @@ export async function runAgentLoop(deps: LoopDeps, state: SessionState, turn: Tu
         }
         const hayTexto = res.content.some((b) => b.type === "text" && b.text.trim());
         if (hayTexto) await pushAssistant(res);
-        await notice("warn", "La respuesta se cortó por límite de tokens.");
+        await notice("warn", hayTexto ? "La respuesta se cortó por límite de tokens." : "El modelo agotó su límite de tokens razonando y no produjo respuesta. Intenta de nuevo con una petición más acotada.");
         return "done";
       }
 
       case "tool_use": {
         if (ultima) {
           // No deberia ocurrir con tool_choice none; si ocurre, no se ejecuta nada.
-          await notice("warn", "Se alcanzó el máximo de iteraciones del agente.");
+          await notice("warn", opts.soloResumen ? "El modelo intentó usar herramientas al resumir; no se ejecutó nada." : "Se alcanzó el máximo de iteraciones del agente.");
+          return "done";
+        }
+        if (toolUses(res.content).length === 0) {
+          // stop_reason tool_use sin ningun bloque tool_use: guardar un mensaje `user` vacio rompe la siguiente llamada (400).
+          await pushAssistant(res);
+          await notice("warn", "El modelo indicó que usaría una herramienta pero no envió ninguna llamada. Intenta de nuevo.");
           return "done";
         }
         const status = await handleToolUse(deps, state, turn, emit, res);
@@ -211,7 +257,15 @@ export async function runAgentLoop(deps: LoopDeps, state: SessionState, turn: Tu
         return "done";
 
       case "model_context_window_exceeded":
-        await notice("error", "La conversación excedió la ventana de contexto. Inicia una nueva conversación.");
+        if (opts.rollbackTo) {
+          // El mensaje de este turno no cabe: se descarta del historial para que la conversacion siga usable (y no falle cada turno).
+          state.messages = opts.rollbackTo;
+          state.pending = null;
+          await deps.persist();
+          await notice("error", "La conversación excedió la ventana de contexto: tu último mensaje se descartó. Inicia una nueva conversación para continuar.");
+        } else {
+          await notice("error", "La conversación excedió la ventana de contexto. Inicia una nueva conversación.");
+        }
         return "done";
 
       default:
@@ -220,7 +274,6 @@ export async function runAgentLoop(deps: LoopDeps, state: SessionState, turn: Tu
     }
 
     if (ultima) return "done";
-    // Si la iteracion que viene es la ultima y el modelo aun quiere herramientas, se pedira el resumen final.
   }
   await notice("warn", "Se alcanzó el máximo de iteraciones del agente.");
   return "done";
@@ -233,7 +286,7 @@ async function runPlainTool(deps: LoopDeps, turn: TurnAcc, emit: Emit, u: Anthro
   const ms = Date.now() - t0;
   const output = r.ok ? r.output : r.error;
   turn.tools.push({ name: u.name, ms, ok: r.ok });
-  await emit({ type: "tool_result", id: u.id, name: u.name, ok: r.ok, output, ms });
+  await emit({ type: "tool_result", id: u.id, name: u.name, ok: r.ok, output, ms, ...(r.ok ? {} : { ...(r.code ? { code: r.code } : {}), ...(r.ref ? { ref: r.ref } : {}) }) });
   return toolResultBlock(u.id, r.ok, output);
 }
 
@@ -262,7 +315,7 @@ async function handleToolUse(
     return "continue";
   }
   const results = new Map<string, Anthropic.ToolResultBlockParam>();
-  let gated: { use: Anthropic.ToolUseBlock; input: unknown; data: unknown; view: PendingView["vista"]; resumen: string } | null = null;
+  let gated: { use: Anthropic.ToolUseBlock; input: unknown; data: unknown; view: PendingView["vista"]; resumen: string; huella?: string } | null = null;
 
   for (const u of uses) {
     const tool = deps.tools.find((t) => t.name === u.name);
@@ -274,15 +327,15 @@ async function handleToolUse(
     const pf = await preflightTool(tool, u.input, deps.ctx);
     if (!pf.ok) {
       // Bloqueado o invalido: el error vuelve al modelo; la persona no se entera.
-      turn.tools.push({ name: u.name, ms: 0, ok: false, ...(pf.error.startsWith("No se puede crear") ? { bloqueo: "controles" as const } : {}) });
-      await emit({ type: "tool_result", id: u.id, name: u.name, ok: false, output: pf.error, ms: 0 });
+      turn.tools.push({ name: u.name, ms: 0, ok: false, ...(pf.code === CODIGO.CONTROLES_FALLA ? { bloqueo: "controles" as const } : {}) });
+      await emit({ type: "tool_result", id: u.id, name: u.name, ok: false, output: pf.error, ms: 0, ...(pf.code ? { code: pf.code } : {}), ...(pf.ref ? { ref: pf.ref } : {}) });
       results.set(u.id, toolResultBlock(u.id, false, pf.error));
     } else if (gated) {
       const msg = "No ejecutada: solo se admite una acción con confirmación por turno. Pídela por separado.";
       await emit({ type: "tool_result", id: u.id, name: u.name, ok: false, output: msg, ms: 0 });
       results.set(u.id, toolResultBlock(u.id, false, msg));
     } else {
-      gated = { use: u, input: pf.input, data: pf.data, view: pf.vista, resumen: pf.resumen };
+      gated = { use: u, input: pf.input, data: pf.data, view: pf.vista, resumen: pf.resumen, ...(pf.huella ? { huella: pf.huella } : {}) };
     }
   }
 
@@ -298,6 +351,7 @@ async function handleToolUse(
     name: gated.use.name,
     input: gated.input,
     preflight: gated.data,
+    ...(gated.huella ? { huella: gated.huella } : {}),
     view: { pendingId: "", toolUseId: gated.use.id, name: gated.use.name, resumen: gated.resumen, vista: gated.view },
     order: ids,
     partial: Object.fromEntries(results),
@@ -315,6 +369,7 @@ async function handleToolUse(
     tool: pending.name,
     input: pending.input,
     traceId: turn.traceId,
+    ...(pending.huella ? { huella: pending.huella } : {}),
     ...(vista?.solicitudId ? { solicitudId: vista.solicitudId, controles: vista.controles } : {}),
   });
   await deps.persist();
@@ -349,23 +404,44 @@ export async function resolvePending(
   await emit({ type: "decision", pendingId: p.pendingId, decision: decision.aprobar ? "aprobar" : "rechazar", ...(decision.comentario ? { comentario: decision.comentario } : {}) });
 
   let ok = false;
+  let obsoleta = false; // aprobacion invalidada porque cambiaron datos/controles: el agente SI puede volver a proponer (con nueva aprobacion)
   let output: unknown;
+  let fail: { code?: string; ref?: string } = {};
+  const tool = deps.tools.find((t) => t.name === p.name);
   const t0 = Date.now();
   if (decision.aprobar) {
-    const r = await executeTool(deps.tools, p.name, p.input, deps.ctx, {
-      confirmation: "humano",
-      preflight: p.preflight,
-      ...(decision.comentario ? { comentarioAprobador: decision.comentario } : {}),
-    });
-    ok = r.ok;
-    output = r.ok ? r.output : r.error;
-    state.audit.push({ ts: deps.now(), type: "tool_ejecutada", pendingId: p.pendingId, tool: p.name, ok, resultado: output, traceId: turn.traceId });
+    // La aprobacion vale SOLO para lo que la persona vio: se re-ejecuta el preflight y se compara la huella
+    // (OC + controles + documentos). Si cambio algo (p. ej. aparecio una factura), no se crea nada.
+    let invalida: string | null = null;
+    if (tool?.preflight && p.huella !== undefined) {
+      const pf = await preflightTool(tool, p.input, deps.ctx);
+      if (!pf.ok) invalida = `${MSG_APROBACION_OBSOLETA} Estado actual: ${pf.error}`;
+      else if (pf.huella !== p.huella) invalida = MSG_APROBACION_OBSOLETA;
+    }
+    if (invalida) {
+      output = invalida;
+      obsoleta = true;
+      fail = { code: CODIGO.APROBACION_OBSOLETA };
+      state.audit.push({ ts: deps.now(), type: "aprobacion_invalidada", pendingId: p.pendingId, tool: p.name, traceId: turn.traceId });
+      await emit({ type: "notice", level: "warn", text: MSG_APROBACION_OBSOLETA });
+    } else {
+      const r = await executeTool(deps.tools, p.name, p.input, deps.ctx, {
+        confirmation: "humano",
+        preflight: p.preflight,
+        ...(decision.aprobar && decision.comentario ? { comentarioAprobador: decision.comentario } : {}),
+      });
+      ok = r.ok;
+      output = r.ok ? r.output : r.error;
+      if (!r.ok) fail = { ...(r.code ? { code: r.code } : {}), ...(r.ref ? { ref: r.ref } : {}) };
+      state.audit.push({ ts: deps.now(), type: "tool_ejecutada", pendingId: p.pendingId, tool: p.name, ok, resultado: output, traceId: turn.traceId });
+    }
   } else {
     output = `RECHAZADA por la persona. Comentario: ${decision.comentario?.trim() || "(sin comentario)"}`;
   }
   const ms = Date.now() - t0;
   turn.tools.push({ name: p.name, ms, ok, ...(decision.aprobar ? {} : { bloqueo: "rechazo" as const }) });
-  await emit({ type: "tool_result", id: p.toolUseId, name: p.name, ok, output, ms });
+  const recibo = ok ? tool?.recibo?.(output) : undefined;
+  await emit({ type: "tool_result", id: p.toolUseId, name: p.name, ok, output, ms, ...fail, ...(recibo !== undefined ? { recibo } : {}) });
 
   const own = toolResultBlock(p.toolUseId, ok, output);
   state.messages.push({ role: "user", content: p.order.map((id) => (id === p.toolUseId ? own : p.partial[id] ?? toolResultBlock(id, false, ERR_INTERRUMPIDA))) });
@@ -373,7 +449,7 @@ export async function resolvePending(
   if (decision.aprobar && ok) {
     // La OC YA existe en SAP: si falla la llamada que redacta el resumen, no es un error que invite a reintentar.
     try {
-      return await runAgentLoop(deps, state, turn, emit);
+      return await runAgentLoop(deps, state, turn, emit, { soloResumen: !obsoleta });
     } catch (e) {
       const numero = (output as { numero?: string } | null)?.numero ?? "(sin número)";
       console.error(JSON.stringify({ level: "error", traceId: turn.traceId, message: `resumen post-OC: ${e instanceof Error ? e.message : String(e)}` }));
@@ -382,5 +458,5 @@ export async function resolvePending(
       return "done";
     }
   }
-  return runAgentLoop(deps, state, turn, emit);
+  return runAgentLoop(deps, state, turn, emit, { soloResumen: !obsoleta });
 }
