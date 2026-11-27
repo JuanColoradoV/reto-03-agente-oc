@@ -1,1 +1,0 @@
-{ "_placeholder": "DATOS DE EJEMPLO", "id": "sol-000", "solicitante": "Ana Compras", "proveedorId": "P-0001", "centroCosto": "CC-100", "moneda": "COP", "items": [ { "descripcion": "Silla de oficina ergonomica", "cantidad": 10, "precioUnitario": 250000 } ] }

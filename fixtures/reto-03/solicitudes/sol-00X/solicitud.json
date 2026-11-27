@@ -1,1 +1,0 @@
-{ "_placeholder": "DATOS DE EJEMPLO (caso negativo)", "id": "sol-00X", "solicitante": "Ana Compras", "proveedorId": "P-0002", "centroCosto": "CC-100", "moneda": "COP", "items": [ { "descripcion": "Escritorio de oficina", "cantidad": 5, "precioUnitario": 400000 } ] }

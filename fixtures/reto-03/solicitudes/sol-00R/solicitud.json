@@ -1,1 +1,0 @@
-{ "_placeholder": "DATOS DE EJEMPLO (caso con alerta: orden retroactiva)", "id": "sol-00R", "solicitante": "Ana Compras", "proveedorId": "P-0001", "centroCosto": "CC-100", "moneda": "COP", "items": [ { "descripcion": "Monitor 27 pulgadas", "cantidad": 4, "precioUnitario": 800000 } ] }
