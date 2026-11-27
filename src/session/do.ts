@@ -1,21 +1,21 @@
-// Durable Object: una instancia por sesion de chat (idFromName(sessionId)). Guarda historial de
-// Anthropic, accion pendiente, SAP simulado (OC + contador), audit log y traza. Solo se importa desde
+// Durable Object: una instancia por sesion de chat (idFromName(sessionId)). Guarda el historial neutral, la confirmacion
+// pendiente, el out/ de la sesion (SAP simulado, control.csv, log.jsonl, evidencias), eventos y traza. Solo se importa desde
 // el Worker (usa "cloudflare:workers").
 import { DurableObject } from "cloudflare:workers";
 import { Hono } from "hono";
+import { configDesdeEnv, type EnvConfig } from "../agent/config";
 import { BUDGET_ID } from "../budget/do";
 import type { BudgetNamespace } from "../budget/ledger";
-import { getPrompt } from "../data/repo";
-import { getClient } from "../llm/client";
-import { createMockClient, withLatency } from "../llm/mock";
-import { ocTools } from "../tools/oc";
-import { fechaNegocio } from "../domain/fecha";
+import { getSystemPrompt } from "../data/textos";
+import { AnthropicAdapter } from "../llm/anthropic";
+import { MockAdapter } from "../llm/mock";
 import { buildSessionApp, MOCK_HEADER } from "./routes";
 import { Session, type SessionEnv } from "./session";
 import { SessionStore } from "./storage";
 
-export interface DoEnv {
+export interface DoEnv extends EnvConfig {
   ANTHROPIC_API_KEY?: string;
+  LLM_MODEL?: string;
   /** Contador global de gasto diario (opcional: sin el binding no se lleva la cuenta global). */
   BUDGET?: BudgetNamespace;
 }
@@ -29,14 +29,11 @@ export class SessionDO extends DurableObject<DoEnv> {
 
   constructor(ctx: DurableObjectState, env: DoEnv) {
     super(ctx, env);
-    // MODO SIMULADO (solo dev): lo decide el Worker por peticion y llega como parametro inmutable del turno (TurnOpts);
-    // el DO no guarda ningun flag mutable que otra peticion concurrente pueda pisar.
+    // MODO SIMULADO (solo dev): lo decide el Worker por peticion y llega como parametro inmutable del turno (TurnOpts).
     const sessionEnv: SessionEnv = {
-      makeClient: ({ mock }) => (mock ? createMockClient() : getClient(this.env.ANTHROPIC_API_KEY)),
-      systemPrompt: getPrompt(),
-      tools: ocTools,
-      toolsFor: ({ mock }) => (mock ? withLatency(ocTools) : ocTools),
-      fecha: () => fechaNegocio(new Date()), // dia calendario en America/Bogota (no UTC)
+      makeLlm: ({ mock }) => (mock ? new MockAdapter() : AnthropicAdapter.conClave(this.env.ANTHROPIC_API_KEY, this.env.LLM_MODEL)),
+      systemPrompt: getSystemPrompt(),
+      config: configDesdeEnv(this.env),
       now: () => new Date().toISOString(),
       log: (e) => console.log(JSON.stringify(e)),
       // Suma el costo estimado de cada turno al presupuesto global del dia (mejor esfuerzo: un fallo no rompe el turno).
@@ -53,7 +50,7 @@ export class SessionDO extends DurableObject<DoEnv> {
   }
 
   async fetch(request: Request): Promise<Response> {
-    // Las lecturas (GET state/trace) nunca esperan nada: no tocan alarma ni lease.
+    // Las lecturas (GET) nunca esperan nada: no tocan alarma ni lease.
     if (request.method !== "GET") await this.ctx.storage.setAlarm(Date.now() + TTL_MS);
     return this.app.fetch(request);
   }

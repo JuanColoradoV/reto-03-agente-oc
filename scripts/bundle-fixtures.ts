@@ -19,6 +19,7 @@ function walk(dir: string): void {
 // Recursivo: incluye maestros/*.json (proveedores y, si existen, centros-costo, indicadores-iva, condiciones-pago) y todas las solicitudes.
 walk(join(root, "fixtures"));
 files["agent/prompt.md"] = readFileSync(join(root, "agent", "prompt.md"), "utf8");
+files["src/knowledge/ordenes-compra.md"] = readFileSync(join(root, "src", "knowledge", "ordenes-compra.md"), "utf8");
 
 const sorted = Object.fromEntries(Object.entries(files).sort(([a], [b]) => a.localeCompare(b)));
 const out =

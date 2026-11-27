@@ -19,7 +19,8 @@
   "include": [
     "src",
     "scripts",
-    "diseno",
+    "modulo",
+    
     "tests",
     "demo.ts"
   ]

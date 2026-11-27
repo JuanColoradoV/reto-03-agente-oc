@@ -1,8 +1,11 @@
 {
-  "_placeholder": "RESULTADOS ESPERADOS DE EJEMPLO - reemplazar por la tabla de los 6 casos del PRD. demo.ts falla (exit 1) si algo no coincide.",
+  "_nota": "Resultados esperados de demo.ts (derivados de los objetivos O1-O4 del PRD y de los datos de los fixtures). demo.ts termina con código 1 si algo no coincide.",
   "casos": {
-    "sol-000": { "bloqueante": false, "oc": true, "total": 2500000, "controles": { "C1": "OK", "C2": "OK", "C3": "OK", "C4": "OK" } },
-    "sol-00R": { "bloqueante": false, "oc": true, "total": 3200000, "controles": { "C1": "OK", "C2": "OK", "C3": "OK", "C4": "ALERTA" } },
-    "sol-00X": { "bloqueante": true, "oc": false, "total": null, "controles": { "C1": "FALLA", "C2": "OK", "C3": "OK", "C4": "OK" } }
+    "sol-001": { "apta": true, "bloqueos": [], "confirmaciones": [], "retroactiva": false, "numero_oc": "4500000001" },
+    "sol-002": { "apta": false, "bloqueos": ["RC1"], "confirmaciones": [], "retroactiva": false, "numero_oc": null },
+    "sol-003": { "apta": false, "bloqueos": ["RC2", "RC3"], "confirmaciones": [], "retroactiva": false, "numero_oc": null },
+    "sol-004": { "apta": true, "bloqueos": [], "confirmaciones": ["RC5"], "retroactiva": false, "numero_oc": "4500000002" },
+    "sol-005": { "apta": true, "bloqueos": [], "confirmaciones": ["RC8"], "retroactiva": true, "numero_oc": "4500000003" },
+    "sol-006": { "apta": true, "bloqueos": [], "confirmaciones": ["RC6"], "retroactiva": false, "numero_oc": "4500000004", "derivados": { "indicador_iva": "C1", "condiciones_pago": "Z030" } }
   }
 }

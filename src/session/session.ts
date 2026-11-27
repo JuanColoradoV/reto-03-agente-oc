@@ -1,17 +1,18 @@
 // Logica de una sesion de chat (sin dependencias de Workers: se prueba con MemoryKV).
 // El Durable Object (do.ts) solo la envuelve. Un turno a la vez por sesion.
 //
-// NOTA DE ALCANCE (autenticacion): aqui NO se identifica a la persona aprobadora. Cualquiera que
-// conozca el sessionId (UUID aleatorio, actua como secreto) puede aprobar. En produccion la identidad
-// del aprobador vendria de SSO/OIDC (p. ej. Cloudflare Access) y se registraria en el audit log.
+// NOTA DE ALCANCE (autenticacion): no hay usuarios. Quien conozca el sessionId (UUID aleatorio, actua como secreto) puede
+// confirmar; la confirmacion queda en excepciones[].confirmado_por del payload como "usuario (chat)". En produccion la
+// identidad vendria de SSO/OIDC (p. ej. Cloudflare Access).
 import { estimateCostUsd } from "../agent/cost";
-import type { TurnUsage, UiEvent, PendingView } from "../agent/events";
-import { appendUserText, newTurn, resolvePending, runAgentLoop, sanitizeHistory, type Emit, type LlmClient, type LoopDeps, type TurnStatus } from "../agent/loop";
-import { CAPS, type SessionState, type TurnTrace } from "../agent/state";
-import { MODEL_AGENT, MissingApiKeyError } from "../llm/client";
-import { InMemorySap } from "../sap";
-import type { ToolDef } from "../tools/registry";
-import { construirAuditoria, type Auditoria } from "./auditoria";
+import { esConfirmacion } from "../agent/efectos";
+import type { ConfigCiclo } from "../agent/config";
+import { CAPS, type SessionState, type TurnTrace, type TurnUsage, type UiEvent, type VistaPendiente } from "../agent/estado";
+import { newTurn, runAgentLoop, type Emit, type LoopDeps, type TurnStatus } from "../agent/loop";
+import { FaltaClaveError } from "../llm/anthropic";
+import type { LlmAdapter } from "../llm/adapter";
+import { fixturesEmpaquetados } from "../domain/fixtures";
+import type { ArchivoOut } from "../out/store";
 import type { SessionStore } from "./storage";
 
 export class SessionError extends Error {
@@ -31,24 +32,16 @@ export interface TurnOpts {
 }
 
 export interface SessionEnv {
-  /** Lanza MissingApiKeyError si no hay clave. */
-  makeClient(opts: TurnOpts): LlmClient;
+  /** Lanza FaltaClaveError si no hay clave. */
+  makeLlm(opts: TurnOpts): LlmAdapter;
   systemPrompt: string;
-  tools: ToolDef[];
-  /** Tools segun los parametros del turno (por defecto `tools`). */
-  toolsFor?(opts: TurnOpts): ToolDef[];
-  fecha(): string;
+  config: ConfigCiclo;
   now(): string;
   log(entry: Record<string, unknown>): void;
-  model?: string;
   /** Reloj en ms (inyectable en pruebas). */
   nowMs?(): number;
   /** Duracion del lease del turno (ms). Por defecto 75 s. */
   leaseMs?: number;
-  /** Tope por llamada al modelo (ms). Por defecto LIMITS.MODEL_TIMEOUT_MS. */
-  modelTimeoutMs?: number;
-  /** Tope del turno completo (ms). Por defecto LIMITS.TURN_TIMEOUT_MS. */
-  turnTimeoutMs?: number;
   /** Se llama al terminar cada turno con su costo estimado (USD): alimenta el presupuesto global diario. Nunca debe lanzar. */
   onSpend?(usd: number): Promise<void> | void;
 }
@@ -69,11 +62,9 @@ export interface PreparedTurn {
 
 export interface SessionSnapshot {
   events: UiEvent[];
-  pending: PendingView | null;
+  pending: VistaPendiente | null;
   turns: number;
   busy: boolean;
-  /** OC ya creadas en esta sesion (para que la UI no ofrezca procesar de nuevo una solicitud con OC). */
-  ordenes: { solicitudId: string; numero: string }[];
 }
 
 type TurnBody = (deps: LoopDeps, turn: ReturnType<typeof newTurn>, emit: Emit) => Promise<TurnStatus>;
@@ -91,7 +82,7 @@ function recortarTextos(v: unknown): unknown {
 
 /**
  * Recorta salidas enormes de tools antes de guardarlas en el historial de eventos. Un `output` ESTRUCTURADO (p. ej. controles de
- * validar_controles) nunca se convierte en texto: se recortan solo sus cadenas largas, para que al recargar la UI y la auditoria
+ * oc_validar) nunca se convierte en texto: se recortan solo sus cadenas largas, para que al recargar la UI y la auditoria
  * sigan leyendo la misma forma (si fuera una cadena, un caso bloqueado se pintaria como "Listo").
  */
 export function compactEvent(e: UiEvent): UiEvent {
@@ -102,19 +93,6 @@ export function compactEvent(e: UiEvent): UiEvent {
   if (typeof e.output === "string") return { ...e, output: s.slice(0, MAX_EVENT_OUTPUT) + "… [truncado]" };
   const compacto = recortarTextos(e.output);
   return JSON.stringify(compacto).length <= MAX_EVENT_OUTPUT * 2 ? { ...e, output: compacto } : { ...e, output: s.slice(0, MAX_EVENT_OUTPUT) + "… [truncado]" };
-}
-
-/** Recorta el registro de auditoria a CAPS.AUDIT: primero se descartan los `mensaje` mas viejos (ruido); las decisiones y OC se conservan. */
-export function recortarAuditoria(audit: SessionState["audit"], max: number): void {
-  let sobran = audit.length - max;
-  if (sobran <= 0) return;
-  for (let i = 0; i < audit.length && sobran > 0; ) {
-    if (audit[i]!.type === "mensaje") {
-      audit.splice(i, 1);
-      sobran--;
-    } else i++;
-  }
-  if (sobran > 0) audit.splice(0, sobran); // solo si no habia suficientes mensajes: se pierde lo mas antiguo
 }
 
 const bytes = (v: unknown): number => new TextEncoder().encode(JSON.stringify(v)).length;
@@ -167,17 +145,17 @@ export class Session {
     await this.store.setLease(this.nowMs() + (this.env.leaseMs ?? LEASE_MS));
   }
 
-  private client(opts: TurnOpts): LlmClient {
+  private llm(opts: TurnOpts): LlmAdapter {
     try {
-      return this.env.makeClient(opts);
+      return this.env.makeLlm(opts);
     } catch (e) {
-      if (e instanceof MissingApiKeyError) throw new SessionError("missing_api_key", e.message, 503);
+      if (e instanceof FaltaClaveError) throw new SessionError("missing_api_key", e.message, 503);
       throw e;
     }
   }
 
   /** Ejecuta la preparacion con el candado tomado; si falla, lo libera. Si sale bien, `run`/`cancel` lo liberan. */
-  private async prepare(prep: () => Promise<{ state: SessionState; client: LlmClient; opts: TurnOpts; body: TurnBody }>): Promise<PreparedTurn> {
+  private async prepare(prep: () => Promise<{ state: SessionState; llm: LlmAdapter; opts: TurnOpts; body: TurnBody }>): Promise<PreparedTurn> {
     this.lock();
     let ready: Awaited<ReturnType<typeof prep>>;
     try {
@@ -193,7 +171,7 @@ export class Session {
       run: (onEvent) => {
         if (used) return Promise.reject(new Error("El turno ya se ejecutó o se canceló."));
         used = true;
-        return this.runTurn(ready.state, ready.client, ready.opts, onEvent, ready.body);
+        return this.runTurn(ready.state, ready.llm, ready.opts, onEvent, ready.body);
       },
       cancel: () => {
         if (used) return;
@@ -210,46 +188,25 @@ export class Session {
       if (!text) throw new SessionError("peticion_invalida", "El mensaje está vacío.", 400);
       if (text.length > CAPS.MENSAJE_CHARS) throw new SessionError("peticion_invalida", `El mensaje supera ${CAPS.MENSAJE_CHARS} caracteres.`, 400);
       const state = await this.store.load();
-      if (state.pending) throw new SessionError("confirmacion_pendiente", "Hay una acción pendiente de confirmación: apruébala o recházala antes de continuar.", 409);
       if (state.messages.length >= CAPS.MESSAGES || state.turns >= CAPS.TURNS) {
         throw new SessionError("sesion_larga", "La conversación es demasiado larga. Inicia una nueva conversación.", 409);
       }
       if (bytes(state.messages) > CAPS.VALUE_BYTES) throw new SessionError("sesion_larga", "La conversación es demasiado larga. Inicia una nueva conversación.", 409);
-      const client = this.client(opts);
+      const llm = this.llm(opts);
       return {
         state,
-        client,
+        llm,
         opts,
         body: async (deps, turn, emit) => {
           state.turns++;
-          sanitizeHistory(state); // cierra tool_use huerfanos y fusiona `user` consecutivos ANTES del nuevo mensaje
-          const rollbackTo = [...state.messages]; // copia superficial valida: los mensajes nunca se mutan, solo se reemplazan o agregan
-          appendUserText(state, text);
-          state.audit.push({ ts: this.env.now(), type: "mensaje", chars: text.length, traceId: turn.traceId });
+          state.messages.push({ rol: "usuario", texto: text });
+          // Confirmacion humana: SOLO si hay una accion pendiente (fijada por el servidor) y este mensaje la confirma.
+          // El boton de la UI envia el mismo texto. Se expone a las herramientas por el contexto, nunca por el modelo.
+          if (state.pendiente && esConfirmacion(text)) deps.ctx = { ...deps.ctx, confirmadoPor: "usuario (chat)", confirmadoCaso: state.pendiente.caso };
           await emit({ type: "user_text", text });
           await deps.persist();
-          return runAgentLoop(deps, state, turn, emit, { rollbackTo });
+          return runAgentLoop(deps, state, turn, emit);
         },
-      };
-    });
-  }
-
-  startConfirm(pendingId: string, decision: "aprobar" | "rechazar", comentario?: string, opts: TurnOpts = {}): Promise<PreparedTurn> {
-    return this.prepare(async () => {
-      // Rechazar exige un motivo: queda en el registro de auditoria y se muestra en la conversacion.
-      if (decision === "rechazar" && !comentario?.trim()) throw new SessionError("motivo_requerido", "Para rechazar escribe el motivo.", 400);
-      const state = await this.store.load();
-      // Valida contra la accion pendiente GUARDADA en el servidor. Se consume una sola vez (resolvePending).
-      if (!state.pending || state.pending.pendingId !== pendingId) {
-        throw new SessionError("confirmacion_invalida", "La confirmación no es válida o ya fue procesada.", 409);
-      }
-      const client = this.client(opts);
-      const c = comentario?.trim() || undefined;
-      return {
-        state,
-        client,
-        opts,
-        body: (deps, turn, emit) => resolvePending(deps, state, turn, emit, { aprobar: decision === "aprobar", ...(c ? { comentario: c } : {}) }),
       };
     });
   }
@@ -258,20 +215,17 @@ export class Session {
   async chat(mensaje: string, onEvent: (e: UiEvent) => Promise<void> | void = () => {}, opts: TurnOpts = {}): Promise<TurnResult> {
     return (await this.startChat(mensaje, opts)).run(onEvent);
   }
-  async confirm(pendingId: string, decision: "aprobar" | "rechazar", comentario?: string, onEvent: (e: UiEvent) => Promise<void> | void = () => {}, opts: TurnOpts = {}): Promise<TurnResult> {
-    return (await this.startConfirm(pendingId, decision, comentario, opts)).run(onEvent);
-  }
 
   private async runTurn(
     state: SessionState,
-    client: LlmClient,
+    llm: LlmAdapter,
     opts: TurnOpts,
     onEvent: (e: UiEvent) => Promise<void> | void,
     body: TurnBody,
   ): Promise<TurnResult> {
     const traceId = crypto.randomUUID();
     const turn = newTurn(traceId);
-    const model = this.env.model ?? MODEL_AGENT;
+    const model = llm.modelo;
     const record = (e: UiEvent) => {
       state.events.push(compactEvent(e));
       if (state.events.length > CAPS.EVENTS) state.events.splice(0, state.events.length - CAPS.EVENTS);
@@ -286,19 +240,15 @@ export class Session {
       }
     };
     const deps: LoopDeps = {
-      client,
+      llm,
       systemPrompt: this.env.systemPrompt,
-      tools: this.env.toolsFor?.(opts) ?? this.env.tools,
-      ctx: { sap: new InMemorySap(state.sap), fecha: this.env.fecha(), log: (x) => console.error(JSON.stringify({ traceId, sessionId: this.sessionId, ...x })) },
+      ctx: { directory: "/", sessionId: this.sessionId, store: this.store.outStore(), fixtures: fixturesEmpaquetados, ahora: () => new Date(this.env.now()) },
+      config: this.env.config,
       persist: async () => {
         acotarEventos(state.events, CAPS.VALUE_BYTES);
         await this.store.save(state);
         await this.renewLease().catch(() => {});
       },
-      now: () => this.env.now(),
-      model,
-      ...(this.env.modelTimeoutMs ? { modelTimeoutMs: this.env.modelTimeoutMs } : {}),
-      ...(this.env.turnTimeoutMs !== undefined ? { turnTimeoutMs: this.env.turnTimeoutMs } : {}),
     };
 
     // Heartbeat del lease: una llamada al modelo puede durar mas que el lease (hasta MODEL_TIMEOUT_MS). Mientras ESTE proceso
@@ -312,7 +262,6 @@ export class Session {
       status = "error";
       // Detalle solo en el log del servidor; al cliente, mensaje generico con id de correlacion.
       console.error(JSON.stringify({ level: "error", traceId, sessionId: this.sessionId, message: e instanceof Error ? e.message : String(e), stack: e instanceof Error ? e.stack : undefined }));
-      state.audit.push({ ts: this.env.now(), type: "turno_error", traceId });
       await emit({ type: "notice", level: "error", text: `No se pudo completar la solicitud. Intenta de nuevo. (ref: ${traceId.slice(0, 8)})` });
     }
 
@@ -320,16 +269,16 @@ export class Session {
     const u = turn.usage;
     // Modo simulado: los tokens los inventa el guion, asi que NO se estima un costo (se reporta 0 y se marca `simulado`).
     const simulado = opts.mock === true;
-    const usage: TurnUsage = { traceId, calls: u.calls, input: u.input, output: u.output, cacheRead: u.cacheRead, cacheWrite: u.cacheWrite, costUsd: simulado ? 0 : estimateCostUsd(model, u), ...(simulado ? { simulado: true } : {}) };
+    const usage: TurnUsage = { traceId, calls: u.calls, input: u.entrada, output: u.salida, cacheRead: u.cacheLeida, cacheWrite: u.cacheEscrita, costUsd: simulado ? 0 : estimateCostUsd(model, { input: u.entrada, output: u.salida, cacheRead: u.cacheLeida, cacheWrite: u.cacheEscrita }), ...(simulado ? { simulado: true } : {}) };
     const trace: TurnTrace = { traceId, ts: this.env.now(), model, status, iterations: turn.iterations, tools: turn.tools, usage };
     state.trace.push(trace);
     const c = state.costo; // acumuladores de toda la sesion (no se recortan con la traza)
     c.turnos++;
     c.llamadasModelo += u.calls;
-    c.input += u.input;
-    c.output += u.output;
-    c.cacheRead += u.cacheRead;
-    c.cacheWrite += u.cacheWrite;
+    c.input += u.entrada;
+    c.output += u.salida;
+    c.cacheRead += u.cacheLeida;
+    c.cacheWrite += u.cacheEscrita;
     c.costoUsd += usage.costUsd;
     if (simulado) c.simulado = true;
     try {
@@ -338,7 +287,6 @@ export class Session {
       /* el contador global es de mejor esfuerzo: no rompe el turno */
     }
     if (state.trace.length > CAPS.TRACE) state.trace.splice(0, state.trace.length - CAPS.TRACE);
-    recortarAuditoria(state.audit, CAPS.AUDIT);
     this.env.log({
       level: "info",
       event: "turn",
@@ -348,7 +296,7 @@ export class Session {
       status,
       iterations: turn.iterations,
       tools: turn.tools,
-      tokens: { input: u.input, output: u.output, cacheRead: u.cacheRead, cacheWrite: u.cacheWrite },
+      tokens: { input: u.entrada, output: u.salida, cacheRead: u.cacheLeida, cacheWrite: u.cacheEscrita },
       costUsd: usage.costUsd,
     });
     record({ type: "usage", usage }); // se guarda con el estado ANTES de avisar al cliente (la traza que lea ya incluye este turno)
@@ -386,7 +334,7 @@ export class Session {
   async snapshot(): Promise<SessionSnapshot> {
     const s = await this.store.load();
     const busy = this.locked || (await this.store.getLease()) > this.nowMs();
-    return { events: s.events, pending: s.pending?.view ?? null, turns: s.turns, busy, ordenes: s.sap.ordenes.map((o) => ({ solicitudId: o.solicitudId, numero: o.numero })) };
+    return { events: s.events, pending: s.pendiente, turns: s.turns, busy };
   }
 
   async trace(): Promise<TurnTrace[]> {
@@ -398,8 +346,16 @@ export class Session {
     return (await this.store.load()).costo;
   }
 
-  async auditoria(): Promise<Auditoria> {
-    return construirAuditoria(this.sessionId, await this.store.load(), this.env.now());
+  /** Archivos generados en out/ de esta sesion (para la UI y la API). */
+  async archivos(): Promise<ArchivoOut[]> {
+    return this.store.outStore().listar();
+  }
+  async archivo(ruta: string): Promise<Uint8Array | null> {
+    try {
+      return await this.store.outStore().leerBytes(ruta);
+    } catch {
+      return null;
+    }
   }
 
   async reset(): Promise<void> {

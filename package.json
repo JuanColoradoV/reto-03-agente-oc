@@ -8,7 +8,8 @@
   },
   "description": "Agente conversacional de ordenes de compra (SAP simulado) - Reto 3",
   "scripts": {
-    "bundle": "tsx scripts/bundle-fixtures.ts",
+    "bundle": "tsx scripts/bundle-fixtures.ts && tsx scripts/build-modulo.ts",
+    "modulo": "tsx scripts/build-modulo.ts",
     "predev": "npm run bundle",
     "dev": "wrangler dev",
     "predemo": "npm run bundle",
@@ -18,14 +19,13 @@
     "predeploy": "npm run bundle",
     "deploy": "wrangler deploy",
     "pretest": "npm run bundle",
-    "test": "tsx --test tests/*.test.ts diseno/sap-real/*.test.ts",
-    "check": "npm run typecheck && npm test && npm run demo",
-    "eval": "tsx scripts/eval.ts",
-    "preeval": "npm run bundle"
+    "test": "tsx --test tests/*.test.ts",
+    "check": "npm run typecheck && npm test && npm run demo"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.14.0",
     "hono": "^4.13.23",
+    "pdf-lib": "^1.17.1",
     "zod": "^4.6.7"
   },
   "devDependencies": {

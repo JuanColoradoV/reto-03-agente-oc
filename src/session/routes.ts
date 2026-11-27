@@ -3,7 +3,7 @@
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { z } from "zod";
-import { auditoriaCsv } from "./auditoria";
+import { rutaSegura, tipoDe } from "../out/store";
 import { SessionError, type PreparedTurn, type Session, type TurnOpts } from "./session";
 
 /** Cabecera interna que SOLO pone el Worker tras verificar mockEnabled (el Worker nunca copia cabeceras del cliente). */
@@ -15,11 +15,6 @@ export const KEEPALIVE_MS = 15_000;
 const err = (code: string, message: string) => ({ error: { code, message } });
 
 const chatBody = z.object({ mensaje: z.string() });
-const confirmBody = z.object({
-  pendingId: z.string().min(1).max(100),
-  decision: z.enum(["aprobar", "rechazar"]),
-  comentario: z.string().max(1000).optional(),
-});
 
 export function buildSessionApp(getSession: () => Session, opts: { keepAliveMs?: number } = {}) {
   const app = new Hono();
@@ -64,16 +59,21 @@ export function buildSessionApp(getSession: () => Session, opts: { keepAliveMs?:
     return stream(c, () => getSession().startChat(b.data.mensaje, turnOpts(c)));
   });
 
-  app.post("/confirm", async (c) => {
-    const b = confirmBody.safeParse(await c.req.json().catch(() => null));
-    if (!b.success) return c.json(err("peticion_invalida", "Cuerpo de la petición inválido."), 400);
-    return stream(c, () => getSession().startConfirm(b.data.pendingId, b.data.decision, b.data.comentario, turnOpts(c)));
-  });
-
   app.get("/state", async (c) => c.json(await getSession().snapshot()));
   app.get("/trace", async (c) => c.json({ trace: await getSession().trace(), costo: await getSession().costo() }));
-  app.get("/auditoria", async (c) => c.json(await getSession().auditoria()));
-  app.get("/auditoria.csv", async (c) => c.body(auditoriaCsv(await getSession().auditoria()), 200, { "content-type": "text/csv; charset=utf-8" }));
+  // Archivos generados en out/ de esta sesion (listado y descarga).
+  app.get("/out", async (c) => c.json({ archivos: await getSession().archivos() }));
+  app.get("/out/*", async (c) => {
+    let ruta: string;
+    try {
+      ruta = rutaSegura(decodeURIComponent(c.req.path.replace(/^\/out\//, "")));
+    } catch {
+      return c.json(err("no_encontrado", "Archivo no encontrado."), 404);
+    }
+    const bytes = await getSession().archivo(ruta);
+    if (!bytes) return c.json(err("no_encontrado", "Archivo no encontrado."), 404);
+    return c.body(bytes as unknown as ArrayBuffer, 200, { "content-type": tipoDe(ruta), "content-disposition": `attachment; filename="${ruta.split("/").pop()}"` });
+  });
   app.post("/reset", async (c) => {
     try {
       await getSession().reset();

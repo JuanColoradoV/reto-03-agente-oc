@@ -2,17 +2,16 @@
 // (src/session/). El cliente solo envia {sessionId, mensaje} / {sessionId, pendingId, decision}.
 import { Hono, type Context } from "hono";
 import { z } from "zod";
-import { executeTool } from "./tools/registry";
-import { ocTools } from "./tools/oc";
-import { InMemorySap } from "./sap";
-import { claveUsable } from "./llm/client";
+import { CAPS } from "./agent/estado";
+import { fixturesEmpaquetados } from "./domain/fixtures";
+import { claveUsable, MODELO_POR_DEFECTO } from "./llm/anthropic";
 import { mockEnabled } from "./llm/mock";
-import { CAPS } from "./agent/state";
 import { MOCK_HEADER } from "./session/routes";
 import { MSG_PRESUPUESTO, parseBudget, type BudgetNamespace } from "./budget/ledger";
 
 export type Env = {
   ANTHROPIC_API_KEY?: string;
+  LLM_MODEL?: string;
   /** Solo desarrollo: MOCK_LLM=1 en .dev.vars. Se ignora fuera de localhost (o ENV=dev). */
   MOCK_LLM?: string;
   ENV?: string;
@@ -80,7 +79,7 @@ app.use("/api/*", async (c, next) => {
   if (c.req.method === "POST") {
     const limited = c.env.CHAT_LIMITER ? !(await c.env.CHAT_LIMITER.limit({ key: ip })).success : rateLimitedLocal(`post:${ip}`, RATE.MAX);
     if (limited) return rateLimited(c);
-  } else if (c.req.method === "GET" && c.req.path.startsWith("/api/sesion/")) {
+  } else if (c.req.method === "GET" && /^\/api\/sesi(on|ons)\//.test(c.req.path)) {
     // Lecturas de sesion (estado/traza): tope propio, mas holgado (la UI sondea mientras un turno sigue en curso).
     const limited = c.env.READ_LIMITER ? !(await c.env.READ_LIMITER.limit({ key: ip })).success : rateLimitedLocal(`get:${ip}`, RATE.MAX_READ);
     if (limited) return rateLimited(c);
@@ -90,13 +89,8 @@ app.use("/api/*", async (c, next) => {
 
 const sessionId = z.string().uuid();
 // El tope de caracteres tiene una sola fuente (CAPS.MENSAJE_CHARS); se valida abajo para dar un error que lo indique.
-const chatBody = z.object({ sessionId, mensaje: z.string().min(1) });
-const confirmBody = z.object({
-  sessionId,
-  pendingId: z.string().min(1).max(100),
-  decision: z.enum(["aprobar", "rechazar"]),
-  comentario: z.string().max(1000).optional(),
-});
+// PRD 6.4: { sessionId, message }. Se acepta tambien `mensaje` (nombre usado por la UI).
+const chatBody = z.object({ sessionId, message: z.string().min(1).optional(), mensaje: z.string().min(1).optional() }).refine((b) => b.message ?? b.mensaje, "Falta el mensaje.");
 
 const stub = (env: Env, id: string) => env.SESSIONS.get(env.SESSIONS.idFromName(id));
 const isMock = (c: { env: Env; req: { url: string } }) => mockEnabled(c.env, c.req.url);
@@ -116,12 +110,23 @@ const forwardRead = async (c: { env: Env; req: { url: string } }, id: string, pa
 };
 const jsonInit = (body: unknown): RequestInit => ({ method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
 
-app.get("/api/health", (c) => c.json({ ok: true, hasApiKey: claveUsable(c.env.ANTHROPIC_API_KEY), mock: isMock(c), limits: { mensajeChars: CAPS.MENSAJE_CHARS } }));
+// PRD 6.4: { ok, provider, model } sin exponer claves. Los demas campos son informativos para la UI (nunca la clave).
+app.get("/api/health", (c) => {
+  const mock = isMock(c);
+  return c.json({ ok: true, provider: mock ? "mock" : "anthropic", model: mock ? "mock-guion" : c.env.LLM_MODEL || MODELO_POR_DEFECTO, hasApiKey: claveUsable(c.env.ANTHROPIC_API_KEY), mock, limits: { mensajeChars: CAPS.MENSAJE_CHARS } });
+});
 
 // Datos para los botones de accion rapida (sin LLM ni sesion).
 app.get("/api/solicitudes", async (c) => {
-  const r = await executeTool(ocTools, "listar_solicitudes", {}, { sap: new InMemorySap(), fecha: "" });
-  return r.ok ? c.json({ solicitudes: r.output }) : c.json(err("error_interno", "No se pudieron listar las solicitudes."), 500);
+  const casos = await fixturesEmpaquetados.listarCasos();
+  const solicitudes = await Promise.all(
+    casos.map(async (id) => {
+      const correo = JSON.parse((await fixturesEmpaquetados.leer(`solicitudes/${id}/correo.json`)) ?? "{}") as { asunto?: string };
+      const sol = JSON.parse((await fixturesEmpaquetados.leer(`solicitudes/${id}/solicitud.json`)) ?? "{}") as { solicitante?: string; descripcion?: string };
+      return { id, asunto: correo.asunto ?? null, solicitante: sol.solicitante ?? null, descripcion: sol.descripcion ?? null };
+    }),
+  );
+  return c.json({ solicitudes });
 });
 
 /**
@@ -149,7 +154,8 @@ async function presupuestoAgotado(env: Env): Promise<boolean> {
 app.post("/api/chat", async (c) => {
   const b = chatBody.safeParse(await c.req.json().catch(() => null));
   if (!b.success) return c.json(err("peticion_invalida", "Cuerpo de la petición inválido."), 400);
-  if (b.data.mensaje.length > CAPS.MENSAJE_CHARS) return c.json(err("peticion_invalida", `El mensaje supera el límite de ${CAPS.MENSAJE_CHARS} caracteres.`), 400);
+  const mensaje = (b.data.message ?? b.data.mensaje) as string;
+  if (mensaje.length > CAPS.MENSAJE_CHARS) return c.json(err("peticion_invalida", `El mensaje supera el límite de ${CAPS.MENSAJE_CHARS} caracteres.`), 400);
   if (!claveUsable(c.env.ANTHROPIC_API_KEY) && !isMock(c)) {
     return c.json(err("missing_api_key", "Falta configurar ANTHROPIC_API_KEY. Defínela en .dev.vars (local) o con `wrangler secret put ANTHROPIC_API_KEY`."), 503);
   }
@@ -158,39 +164,28 @@ app.post("/api/chat", async (c) => {
     c.header("Retry-After", "3600");
     return c.json(err("presupuesto_diario", MSG_PRESUPUESTO), 503);
   }
-  return forward(c, b.data.sessionId, "/chat", jsonInit({ mensaje: b.data.mensaje }));
+  return forward(c, b.data.sessionId, "/chat", jsonInit({ mensaje }));
 });
 
-app.post("/api/confirm", async (c) => {
-  const b = confirmBody.safeParse(await c.req.json().catch(() => null));
-  if (!b.success) return c.json(err("peticion_invalida", "Cuerpo de la petición inválido."), 400);
-  const { sessionId: id, ...rest } = b.data;
-  return forward(c, id, "/confirm", jsonInit(rest));
-});
-
-// Estado renderizable (para restaurar el chat al recargar), traza y reinicio. El sessionId es un UUID
-// aleatorio que funciona como secreto de la sesion.
-app.get("/api/sesion/:id", async (c) => {
+// Estado renderizable (para restaurar el chat al recargar), traza, archivos de out/ y reinicio. El sessionId es un UUID
+// aleatorio que funciona como secreto de la sesion. /api/sessions/:id (PRD 6.4) y /api/sesion/:id (nombre original) son equivalentes.
+const leer = (sub: string, destino: string) => async (c: Context<{ Bindings: Env }>) => {
   const id = sessionId.safeParse(c.req.param("id"));
-  return id.success ? forwardRead(c, id.data, "/state") : c.json(err("peticion_invalida", "Sesión inválida."), 400);
-});
-app.get("/api/sesion/:id/traza", async (c) => {
-  const id = sessionId.safeParse(c.req.param("id"));
-  return id.success ? forwardRead(c, id.data, "/trace") : c.json(err("peticion_invalida", "Sesión inválida."), 400);
-});
-// Informe de auditoría (JSON) de la sesión. Misma validación de id y mismo limitador de lecturas (READ_LIMITER) que estado/traza.
-app.get("/api/sesion/:id/auditoria", async (c) => {
-  const id = sessionId.safeParse(c.req.param("id"));
-  return id.success ? forwardRead(c, id.data, "/auditoria") : c.json(err("peticion_invalida", "Sesión inválida."), 400);
-});
-app.get("/api/sesion/:id/auditoria.csv", async (c) => {
-  const id = sessionId.safeParse(c.req.param("id"));
-  return id.success ? forwardRead(c, id.data, "/auditoria.csv") : c.json(err("peticion_invalida", "Sesión inválida."), 400);
-});
-app.post("/api/sesion/:id/reset", async (c) => {
-  const id = sessionId.safeParse(c.req.param("id"));
-  return id.success ? forward(c, id.data, "/reset", { method: "POST" }) : c.json(err("peticion_invalida", "Sesión inválida."), 400);
-});
+  if (!id.success) return c.json(err("peticion_invalida", "Sesión inválida."), 400);
+  const resto = sub === "/out/*" ? c.req.path.slice(c.req.path.indexOf("/out/")) : destino;
+  return forwardRead(c, id.data, resto);
+};
+for (const base of ["/api/sessions/:id", "/api/sesion/:id"]) {
+  app.get(base, leer("", "/state"));
+  app.get(`${base}/trace`, leer("/trace", "/trace"));
+  app.get(`${base}/traza`, leer("/trace", "/trace"));
+  app.get(`${base}/out`, leer("/out", "/out"));
+  app.get(`${base}/out/*`, leer("/out/*", ""));
+  app.post(`${base}/reset`, async (c) => {
+    const id = sessionId.safeParse(c.req.param("id"));
+    return id.success ? forward(c, id.data, "/reset", { method: "POST" }) : c.json(err("peticion_invalida", "Sesión inválida."), 400);
+  });
+}
 
 app.onError((e, c) => {
   const ref = crypto.randomUUID().slice(0, 8);

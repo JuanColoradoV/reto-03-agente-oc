@@ -1,6 +1,7 @@
 // Almacenamiento del estado de sesion detras de una interfaz minima (la de DurableObjectStorage:
 // get(keys[]) / put(obj) atomico / deleteAll). Asi la logica se prueba con MemoryKV sin Workers.
-import { emptyCosto, emptyState, type SessionState } from "../agent/state";
+import { emptyCosto, emptyState, type SessionState } from "../agent/estado";
+import { KvOutStore } from "../out/do";
 
 export interface KVStorage {
   get<T = unknown>(keys: string[]): Promise<Map<string, T>>;
@@ -42,7 +43,7 @@ function costoDesdeTraza(trace: SessionState["trace"] | undefined): SessionState
   return c;
 }
 
-const KEYS = ["messages", "pending", "sap", "audit", "events", "trace", "turns", "costo"] as const;
+const KEYS = ["messages", "pendiente", "events", "trace", "turns", "costo"] as const;
 
 export class SessionStore {
   constructor(private kv: KVStorage) {}
@@ -52,9 +53,7 @@ export class SessionStore {
     const base = emptyState();
     return {
       messages: (got.get("messages") as SessionState["messages"]) ?? base.messages,
-      pending: (got.get("pending") as SessionState["pending"]) ?? null,
-      sap: (got.get("sap") as SessionState["sap"]) ?? base.sap,
-      audit: (got.get("audit") as SessionState["audit"]) ?? base.audit,
+      pendiente: (got.get("pendiente") as SessionState["pendiente"]) ?? null,
       events: (got.get("events") as SessionState["events"]) ?? base.events,
       trace: (got.get("trace") as SessionState["trace"]) ?? base.trace,
       turns: (got.get("turns") as number) ?? 0,
@@ -67,14 +66,17 @@ export class SessionStore {
   async save(s: SessionState): Promise<void> {
     await this.kv.put({
       messages: s.messages,
-      pending: s.pending,
-      sap: s.sap,
-      audit: s.audit,
+      pendiente: s.pendiente,
       events: s.events,
       trace: s.trace,
       turns: s.turns,
       costo: s.costo,
     });
+  }
+
+  /** Archivos de out/ de esta sesion (misma storage del DO). */
+  outStore(): KvOutStore {
+    return new KvOutStore(this.kv);
   }
 
   /** Lease del turno en curso (epoch ms de expiracion). Clave aparte: save() no la toca. */
