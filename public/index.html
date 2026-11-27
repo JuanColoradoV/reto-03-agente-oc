@@ -26,7 +26,6 @@
 
   <div class="shell">
     <main class="chat" aria-label="Conversación">
-      <div id="stepper" class="stepper" hidden></div>
       <div id="scroller" class="scroller" tabindex="-1">
         <div id="log" class="log"></div>
         <div id="loading" class="loading" role="status"><span id="loading-text">Preparando el agente…</span></div>
@@ -40,32 +39,28 @@
       <p id="composer-hint" class="composer-hint" role="status" hidden></p>
     </main>
 
-    <aside id="side" class="side" aria-label="Solicitudes y auditoría">
+    <aside id="side" class="side" aria-label="Solicitudes y archivos">
       <div class="side-head">
         <h2>Solicitudes</h2>
         <button id="drawer-close" class="btn btn-quiet drawer-close" type="button" aria-label="Cerrar panel">Cerrar</button>
       </div>
       <p class="sap-note"><span>SAP simulado de esta conversación</span>
-        <button id="sap-help" class="help-btn" type="button" aria-expanded="false" aria-controls="sap-help-text" aria-label="Más información sobre el SAP simulado" title="Las órdenes que crees viven solo en esta conversación. «Nueva conversación» empieza con un SAP simulado limpio.">?</button>
+        <button id="sap-help" class="help-btn" type="button" aria-expanded="false" aria-controls="sap-help-text" aria-label="Más información sobre el SAP simulado" title="Las órdenes que crees (out/sap/ordenes.jsonl) viven solo en esta conversación. «Nueva conversación» empieza con un SAP simulado limpio.">?</button>
       </p>
       <p id="sap-help-text" class="sap-help" hidden>Las órdenes que crees viven solo en esta conversación. Al pulsar «Nueva conversación» empiezas con un SAP simulado limpio: las órdenes desaparecen y todas las solicitudes vuelven a estar sin procesar.</p>
       <ul id="quick" class="req-list"></ul>
 
-      <section class="side-section" aria-labelledby="audit-title">
-        <h2 id="audit-title" class="side-title">Auditoría</h2>
-        <p class="muted small">Controles, decisiones con su comentario o motivo y número de OC de esta conversación.</p>
-        <div class="audit-links">
-          <a id="audit-csv" class="btn btn-quiet audit-link" href="#" download="auditoria.csv">Descargar auditoría (CSV)</a>
-          <a id="audit-link" class="btn btn-quiet audit-link" href="#" download="auditoria.json" title="Detalle completo, con herramientas y costo">Descargar auditoría (JSON)</a>
-        </div>
+      <section class="side-section" aria-labelledby="files-title">
+        <h2 id="files-title" class="side-title">Archivos generados (out/)</h2>
+        <p class="muted small">Evidencias, trazabilidad, payload, control.csv, log.jsonl y el SAP simulado de esta conversación.</p>
+        <ul id="files" class="req-list"></ul>
       </section>
 
       <details class="side-section diag" id="diag">
         <summary>Diagnóstico técnico</summary>
         <label class="toggle small"><input type="checkbox" id="show-usage"> Mostrar tokens y costo en el chat</label>
-        <div id="trace" class="trace"><p class="muted small">Aún sin actividad.</p></div>
       </details>
-        </aside>
+    </aside>
   </div>
   <div id="scrim" class="scrim" hidden></div>
   <div id="sr-reply" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
@@ -74,7 +69,7 @@
   <dialog id="reset-dialog" class="dialog" aria-labelledby="reset-title" aria-describedby="reset-desc">
     <h2 id="reset-title">¿Empezar una conversación nueva?</h2>
     <p id="reset-desc">Se borra esta conversación y empiezas con un SAP simulado limpio: las órdenes creadas aquí desaparecen y todas las solicitudes vuelven a estar sin procesar.</p>
-    <p id="reset-pending" class="dialog-warn" hidden>Tienes una aprobación pendiente: se descartará sin decidir.</p>
+    <p id="reset-pending" class="dialog-warn" hidden>Tienes una confirmación pendiente: se descartará sin decidir.</p>
     <div class="dialog-actions">
       <button id="reset-cancel" class="btn btn-outline" type="button">Cancelar</button>
       <button id="reset-ok" class="btn btn-primary" type="button">Empezar de nuevo</button>
