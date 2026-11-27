@@ -185,6 +185,8 @@ export class Session {
 
   startConfirm(pendingId: string, decision: "aprobar" | "rechazar", comentario?: string, opts: TurnOpts = {}): Promise<PreparedTurn> {
     return this.prepare(async () => {
+      // Rechazar exige un motivo: queda en el registro de auditoria y se muestra en la conversacion.
+      if (decision === "rechazar" && !comentario?.trim()) throw new SessionError("motivo_requerido", "Para rechazar escribe el motivo.", 400);
       const state = await this.store.load();
       // Valida contra la accion pendiente GUARDADA en el servidor. Se consume una sola vez (resolvePending).
       if (!state.pending || state.pending.pendingId !== pendingId) {
@@ -223,7 +225,8 @@ export class Session {
       state.events.push(compactEvent(e));
       if (state.events.length > CAPS.EVENTS) state.events.splice(0, state.events.length - CAPS.EVENTS);
     };
-    const emit: Emit = async (e) => {
+    const emit: Emit = async (ev) => {
+      const e: UiEvent = ev.ts === undefined ? { ...ev, ts: this.nowMs() } : ev;
       record(e);
       try {
         await onEvent(e); // un cliente desconectado no debe abortar el turno (el estado igual se guarda)

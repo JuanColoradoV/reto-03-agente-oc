@@ -40,6 +40,7 @@ test("prepararOrden: arma la OC desde el caso; bloquea con control en FALLA", ()
 test("registro de controles y matriz derivada", () => {
   assert.deepEqual(CONTROLES.map((c) => c.id), ["C0", "C1", "C2", "C3", "C4"]);
   assert.match(matrizMarkdown(), /\| C1 \| Proveedor en maestro/);
+  for (const c of CONTROLES) { assert.ok(c.descripcion.length > 10, c.id); assert.ok(c.accion.length > 10, c.id); }
 });
 
 test("demo: los resultados esperados coinciden", async () => {

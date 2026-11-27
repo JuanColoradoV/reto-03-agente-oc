@@ -27,6 +27,8 @@ export function listCases(): string[] {
   return [...ids].sort();
 }
 
+// [TODO: ajustar agent/prompt.md con las reglas de negocio del PRD: matriz de controles, umbrales, tratamiento de ordenes
+// retroactivas]. Va aqui y no en el prompt para que no se envie al modelo en cada llamada.
 export function getPrompt(): string {
   const p = FILES["agent/prompt.md"];
   if (!p) throw new Error("agent/prompt.md no esta en el bundle");

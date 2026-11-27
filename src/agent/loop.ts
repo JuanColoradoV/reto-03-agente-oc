@@ -274,7 +274,7 @@ async function handleToolUse(
     const pf = await preflightTool(tool, u.input, deps.ctx);
     if (!pf.ok) {
       // Bloqueado o invalido: el error vuelve al modelo; la persona no se entera.
-      turn.tools.push({ name: u.name, ms: 0, ok: false });
+      turn.tools.push({ name: u.name, ms: 0, ok: false, ...(pf.error.startsWith("No se puede crear") ? { bloqueo: "controles" as const } : {}) });
       await emit({ type: "tool_result", id: u.id, name: u.name, ok: false, output: pf.error, ms: 0 });
       results.set(u.id, toolResultBlock(u.id, false, pf.error));
     } else if (gated) {
@@ -354,7 +354,7 @@ export async function resolvePending(
     output = `RECHAZADA por la persona. Comentario: ${decision.comentario?.trim() || "(sin comentario)"}`;
   }
   const ms = Date.now() - t0;
-  turn.tools.push({ name: p.name, ms, ok });
+  turn.tools.push({ name: p.name, ms, ok, ...(decision.aprobar ? {} : { bloqueo: "rechazo" as const }) });
   await emit({ type: "tool_result", id: p.toolUseId, name: p.name, ok, output, ms });
 
   const own = toolResultBlock(p.toolUseId, ok, output);

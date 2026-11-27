@@ -5,9 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
   <title>Agente OC</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400;1,6..72,500&display=swap">
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
@@ -18,44 +15,61 @@
       <p class="sub">Órdenes de compra · SAP simulado</p>
     </div>
     <div class="head-actions">
-      <time id="folio" class="folio" aria-label="Fecha"></time>
-      <span id="mode-badge" class="stamp amber" role="status" hidden>Modo simulado</span>
-      <span id="health-badge" class="stamp health" role="status" data-state="pending"><span class="dotmark" aria-hidden="true"></span><span id="health-text">Conectando…</span></span>
-      <button id="drawer-toggle" class="btn btn-quiet drawer-toggle" type="button" aria-expanded="false" aria-controls="side">Expediente</button>
-      <button id="reset" class="btn btn-quiet" type="button">Nueva conversación</button>
+      <span id="mode-badge" class="pill alerta" role="status" hidden>Modo simulado</span>
+      <span id="health-badge" class="pill health" role="status" data-state="pending"><span class="dotmark" aria-hidden="true"></span><span id="health-text">Conectando…</span></span>
+      <button id="drawer-toggle" class="btn btn-quiet drawer-toggle" type="button" aria-expanded="false" aria-controls="side">Solicitudes</button>
+      <button id="reset" class="btn btn-quiet" type="button" title="Empieza con un SAP simulado limpio">Nueva conversación</button>
     </div>
   </header>
 
   <div id="banner" class="banner" role="alert" hidden></div>
 
   <div class="shell">
-    <section class="chat" aria-label="Conversación">
+    <main class="chat" aria-label="Conversación">
+      <div id="stepper" class="stepper" hidden></div>
       <div id="scroller" class="scroller" tabindex="-1">
-        <div id="log" class="log" aria-live="polite"></div>
+        <div id="log" class="log"></div>
         <div id="loading" class="loading" role="status"><span id="loading-text">Preparando el agente…</span></div>
       </div>
       <form id="composer" class="composer">
         <label class="sr-only" for="input">Mensaje para el agente</label>
-        <textarea id="input" rows="1" placeholder="Escribe tu mensaje…  (Enter envía, Shift+Enter agrega una línea)" maxlength="4000"></textarea>
+        <textarea id="input" rows="1" placeholder="Ej.: &quot;Procesa la solicitud sol-000&quot; o &quot;¿Qué controles fallaron en sol-00X?&quot;"></textarea>
         <button id="send" class="btn btn-primary" type="submit">Enviar</button>
       </form>
+      <p class="composer-help">Enter envía · Shift+Enter agrega una línea</p>
       <p id="composer-hint" class="composer-hint" role="status" hidden></p>
-    </section>
+    </main>
 
-    <aside id="side" class="side" aria-label="Expediente: solicitudes y traza">
+    <aside id="side" class="side" aria-label="Solicitudes y traza">
       <div class="side-head">
-        <h2>Expediente</h2>
+        <h2>Solicitudes</h2>
         <button id="drawer-close" class="btn btn-quiet drawer-close" type="button" aria-label="Cerrar panel">Cerrar</button>
       </div>
+      <p class="sap-note"><span>SAP simulado de esta conversación</span>
+        <button id="sap-help" class="help-btn" type="button" aria-expanded="false" aria-controls="sap-help-text" aria-label="Más información sobre el SAP simulado" title="Las órdenes que crees viven solo en esta conversación. «Nueva conversación» empieza con un SAP simulado limpio.">?</button>
+      </p>
+      <p id="sap-help-text" class="sap-help" hidden>Las órdenes que crees viven solo en esta conversación. Al pulsar «Nueva conversación» empiezas con un SAP simulado limpio: las órdenes desaparecen y todas las solicitudes vuelven a estar sin procesar.</p>
       <ul id="quick" class="req-list"></ul>
 
       <section class="side-section" aria-labelledby="trace-title">
         <h2 id="trace-title" class="side-title">Traza y costo</h2>
+        <label class="toggle small"><input type="checkbox" id="show-usage"> Mostrar costos en el chat</label>
         <div id="trace" class="trace"><p class="muted small">Aún sin actividad.</p></div>
       </section>
     </aside>
   </div>
   <div id="scrim" class="scrim" hidden></div>
+  <p id="sr-status" class="sr-only" role="status" aria-live="polite"></p>
+
+  <dialog id="reset-dialog" class="dialog" aria-labelledby="reset-title" aria-describedby="reset-desc">
+    <h2 id="reset-title">¿Empezar una conversación nueva?</h2>
+    <p id="reset-desc">Se borra esta conversación y empiezas con un SAP simulado limpio: las órdenes creadas aquí desaparecen y todas las solicitudes vuelven a estar sin procesar.</p>
+    <p id="reset-pending" class="dialog-warn" hidden>Tienes una aprobación pendiente: se descartará sin decidir.</p>
+    <div class="dialog-actions">
+      <button id="reset-cancel" class="btn btn-outline" type="button">Cancelar</button>
+      <button id="reset-ok" class="btn btn-primary" type="button">Empezar de nuevo</button>
+    </div>
+  </dialog>
 
   <script src="/app.js"></script>
 </body>

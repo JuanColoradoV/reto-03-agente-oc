@@ -10,7 +10,7 @@ export function evaluarControl(def: ControlDef, caso: CasoSolicitud, maestros: M
   const ev = def.evaluar(caso, maestros, ctx);
   const resultado =
     ev.estado === "CUMPLE" ? "OK" : ev.estado === "NO_EVALUABLE" ? "ALERTA" : def.severidad === "bloqueante" ? "FALLA" : "ALERTA";
-  return { id: def.id, nombre: def.nombre, severidad: def.severidad, resultado, detalle: ev.detalle };
+  return { id: def.id, nombre: def.nombre, descripcion: def.descripcion, accion: def.accion, severidad: def.severidad, resultado, detalle: ev.detalle };
 }
 
 export function evaluarControles(caso: CasoSolicitud, maestros: Maestros, ctx?: ControlCtx): ResultadoControl[] {

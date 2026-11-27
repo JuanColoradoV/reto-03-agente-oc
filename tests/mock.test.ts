@@ -53,7 +53,60 @@ test("cliente simulado: sol-00X queda bloqueada en el preflight, sin pendiente",
   assert.ok(!events.some((e) => e.type === "pending_confirmation"));
   const txt = events.filter((e) => e.type === "assistant_text").map((e) => (e as { text: string }).text).join(" ");
   assert.match(txt, /C1/);
-  assert.match(txt, /rechazada por controles/);
+  assert.match(txt, /Bloqueada por controles/);
+});
+
+const names = (events: Array<{ type: string }>) => events.filter((e) => e.type === "tool_call").map((e) => (e as unknown as { name: string }).name);
+const said = (events: Array<{ type: string }>) => events.filter((e) => e.type === "assistant_text").map((e) => (e as unknown as { text: string }).text).join("\n");
+
+test("cliente simulado: con una FALLA bloqueante NO llama a crear_orden_compra; explica una vez y se detiene", { timeout: 20000 }, async () => {
+  const s = mockSession();
+  const { events } = await collect((on) => s.chat("Procesa la solicitud sol-00X", on));
+  assert.deepEqual(names(events), ["leer_solicitud", "validar_controles"]);
+  const texts = events.filter((e) => e.type === "assistant_text");
+  assert.equal(texts.length, 3); // anuncio, "documentos leidos" y UN resumen final
+  const txt = said(events);
+  assert.equal((txt.match(/C1/g) ?? []).length, 1, "el motivo no se repite");
+  assert.doesNotMatch(txt, /Solicito crear/);
+  assert.match(txt, /Estado final: \*\*Bloqueada por controles\*\*/);
+});
+
+test("cliente simulado: duplicado (C0) -> Bloqueada por controles, sin crear ni pedir aprobacion", { timeout: 30000 }, async () => {
+  const s = mockSession();
+  const first = await collect((on) => s.chat("Procesa la solicitud sol-000", on));
+  const pc = first.events.find((e) => e.type === "pending_confirmation");
+  assert.ok(pc && pc.type === "pending_confirmation");
+  await s.confirm(pc.pending.pendingId, "aprobar");
+  const { events } = await collect((on) => s.chat("Procesa la solicitud sol-000", on));
+  assert.deepEqual(names(events), ["leer_solicitud", "validar_controles"]);
+  assert.ok(!events.some((e) => e.type === "pending_confirmation"));
+  const txt = said(events);
+  assert.match(txt, /4500000001/);
+  assert.match(txt, /Bloqueada por controles/);
+  assert.doesNotMatch(txt, /OC creada/);
+});
+
+test("cliente simulado: rechazo -> 'Rechazada por el aprobador' con el motivo", { timeout: 20000 }, async () => {
+  const s = mockSession();
+  const { events } = await collect((on) => s.chat("Procesa la solicitud sol-000", on));
+  const pc = events.find((e) => e.type === "pending_confirmation");
+  assert.ok(pc && pc.type === "pending_confirmation");
+  const r = await collect((on) => s.confirm(pc.pending.pendingId, "rechazar", "Falta el visto bueno de finanzas", on));
+  const txt = said(r.events);
+  assert.match(txt, /Rechazada por el aprobador/);
+  assert.match(txt, /Falta el visto bueno de finanzas/);
+  assert.doesNotMatch(txt, /pendiente/i);
+});
+
+test("cliente simulado: '¿Qué controles fallaron en sol-00X?' responde sin leer, crear ni pedir aprobacion", { timeout: 20000 }, async () => {
+  const s = mockSession();
+  const { events } = await collect((on) => s.chat("¿Qué controles fallaron en sol-00X?", on));
+  assert.deepEqual(names(events), ["validar_controles"]);
+  assert.ok(!events.some((e) => e.type === "pending_confirmation"));
+  const txt = said(events);
+  assert.match(txt, /C1/);
+  assert.match(txt, /no crea ni cambia nada/);
+  assert.doesNotMatch(txt, /Estado final/);
 });
 
 test("cliente simulado: mensaje generico -> respuesta corta; withLatency conserva las tools", async () => {

@@ -1,0 +1,6 @@
+# Cabeceras de los assets estaticos (los de /api/* los pone el Worker en src/api.ts: mantener ambos en sincronia).
+/*
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'self'
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer
+  X-Frame-Options: SAMEORIGIN

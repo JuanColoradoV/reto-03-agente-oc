@@ -57,6 +57,10 @@ export type Veredicto = "OK" | "FALLA" | "ALERTA";
 export interface ResultadoControl {
   id: string;
   nombre: string;
+  /** Qué verifica el control, en lenguaje llano. */
+  descripcion?: string;
+  /** Qué hacer si el control falla, en lenguaje llano. */
+  accion?: string;
   severidad: Severidad;
   resultado: Veredicto;
   detalle: string;

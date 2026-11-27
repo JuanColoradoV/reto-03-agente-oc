@@ -20,6 +20,10 @@ export interface ControlDef {
   nombre: string;
   /** Regla en lenguaje natural (va a la matriz de SOLUCION.md). */
   regla: string;
+  /** Qué verifica, en lenguaje llano (se muestra a quien aprueba en la UI). */
+  descripcion: string;
+  /** Qué hacer si no se cumple, en lenguaje llano (se muestra en el aviso de bloqueo). */
+  accion: string;
   /** bloqueante: incumplir => FALLA (no se crea OC). alerta: incumplir => ALERTA (decide el humano). */
   severidad: Severidad;
   /** De donde salen los datos que evalua. */
@@ -36,6 +40,8 @@ const nd = (detalle: string): EvaluacionControl => ({ estado: "NO_EVALUABLE", de
 export const C0_OC_EXISTENTE: ControlDef = {
   id: "C0",
   nombre: "OC existente",
+  descripcion: "Que la solicitud no tenga ya una orden creada.",
+  accion: "Revisa si la solicitud ya tiene su orden; no hace falta procesarla de nuevo.",
   regla: "La solicitud no tiene ya una OC en SAP (idempotencia: una solicitud genera a lo sumo una OC).",
   severidad: "bloqueante",
   fuente: "SAP (OC de la sesión)",
@@ -50,6 +56,8 @@ export const C0_OC_EXISTENTE: ControlDef = {
 export const C1_PROVEEDOR: ControlDef = {
   id: "C1",
   nombre: "Proveedor en maestro",
+  descripcion: "Que el proveedor exista en el maestro y esté activo.",
+  accion: "Cambia el proveedor de la solicitud por uno activo y vuelve a procesarla.",
   regla: "El proveedor existe en el maestro, está activo y no está bloqueado.",
   severidad: "bloqueante",
   fuente: "maestros/proveedores.json + solicitud.json",
@@ -64,6 +72,8 @@ export const C1_PROVEEDOR: ControlDef = {
 export const C2_COTIZACION: ControlDef = {
   id: "C2",
   nombre: "Cotización vs solicitud",
+  descripcion: "Que el total de la cotización coincida con lo solicitado.",
+  accion: "Corrige la cotización o la solicitud para que los totales coincidan y vuelve a procesarla.",
   regla: "El total de la cotización coincide con el total de la solicitud (comparación en centavos enteros).",
   severidad: "bloqueante",
   fuente: "cotizacion.txt + solicitud.json",
@@ -81,6 +91,8 @@ export const C2_COTIZACION: ControlDef = {
 export const C3_APROBACION: ControlDef = {
   id: "C3",
   nombre: "Aprobación",
+  descripcion: "Que exista una aprobación vigente que cubra el monto.",
+  accion: "Consigue una aprobación vigente que cubra el monto y vuelve a procesarla.",
   regla: "Existe una aprobación vigente y su monto aprobado cubre el total.",
   severidad: "bloqueante",
   fuente: "aprobacion.json + solicitud.json",
@@ -98,6 +110,8 @@ export const C3_APROBACION: ControlDef = {
 export const C4_RETROACTIVA: ControlDef = {
   id: "C4",
   nombre: "Orden retroactiva",
+  descripcion: "Que la compra no se haya hecho antes de la orden (retroactiva).",
+  accion: "Confirma con compras que la factura previa es válida antes de continuar.",
   regla: "No debe existir factura previa a la OC; si existe, es una posible orden retroactiva y decide un humano.",
   severidad: "alerta",
   fuente: "factura.txt (opcional)",

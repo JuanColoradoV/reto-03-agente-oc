@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "engines": { "node": ">=20" },
   "description": "Agente conversacional de ordenes de compra (SAP simulado) - Reto 3",
   "scripts": {
     "bundle": "tsx scripts/bundle-fixtures.ts",

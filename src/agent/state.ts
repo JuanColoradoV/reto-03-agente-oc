@@ -31,6 +31,8 @@ export interface ToolTrace {
   name: string;
   ms: number;
   ok: boolean;
+  /** Si no fue un error tecnico sino un resultado de negocio: bloqueada por controles o rechazada por el aprobador. */
+  bloqueo?: "controles" | "rechazo";
 }
 
 export interface TurnTrace {
