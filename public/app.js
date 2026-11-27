@@ -41,6 +41,10 @@
     return (x < 0 ? "-" : "") + int.replace(/\B(?=(\d{3})+(?!\d))/g, ".") + (dec ? "," + dec : "");
   };
   const fmtMoney = (n, cur) => `${fmtNum(n)} ${cur || "COP"}`;
+  const MESES = ["ENE", "FEB", "MAR", "ABR", "MAY", "JUN", "JUL", "AGO", "SEP", "OCT", "NOV", "DIC"];
+  const folioDate = () => { const d = new Date(); return `${String(d.getDate()).padStart(2, "0")} · ${MESES[d.getMonth()]} · ${d.getFullYear()}`; };
+  const clock = () => { if (replaying) return "--:--"; const d = new Date(); return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; };
+  let stampNext = null, lastStamped = null; // sello que lleva el siguiente mensaje del agente (caso bloqueado)
   const k = (n) => (n >= 1000 ? (n / 1000).toFixed(1).replace(".", ",") + "k" : String(n));
   const scroll = () => { if (!pendingId) scroller.scrollTop = scroller.scrollHeight; };
   const showBanner = (msg) => { banner.textContent = msg || ""; banner.hidden = !msg; };
@@ -48,8 +52,8 @@
   const showHint = (msg) => { hint.textContent = msg || ""; hint.hidden = !msg; };
 
   function pill(kind, icon, label) {
-    const p = el("span", "pill " + kind);
-    if (icon === "spin") p.append(Object.assign(el("span", "spin"), { ariaHidden: "true" }));
+    const p = el("span", "stamp " + kind);
+    if (icon === "spin") { /* estado en curso: la elipsis animada la dibuja el CSS */ p.classList.add("running"); }
     else if (icon) { const i = el("span", "ic", icon); i.setAttribute("aria-hidden", "true"); p.append(i); }
     p.append(document.createTextNode(label));
     return p;
@@ -116,12 +120,12 @@
     const box = el("section", "empty");
     box.id = "empty";
     box.append(
-      el("p", "eyebrow", "Agente de órdenes de compra"),
+      el("p", "eyebrow", "Memorando · Cómo funciona"),
       el("h2", "", "Procesa una solicitud de principio a fin"),
-      el("p", "", "El agente lee los documentos de la solicitud, valida los controles de compra y prepara la orden en SAP (simulado)."),
+      el("p", "lead", "El agente lee los documentos de la solicitud, valida los controles de compra y prepara la orden en SAP (simulado)."),
     );
     const steps = el("ol", "steps");
-    ["Lee el correo, la cotización y la aprobación.", "Valida los controles y te muestra cada resultado.", "Te pide aprobación antes de crear la OC. Sin tu decisión no se crea nada."].forEach((t) => steps.append(el("li", "", t)));
+    [["Lee los documentos.", "El correo, la cotización y la aprobación."], ["Valida los controles.", "Te muestra cada resultado, uno por uno."], ["Te pide la firma.", "Sin tu decisión no se crea nada."]].forEach(([h, t]) => { const li = el("li"); li.append(el("span", "", ""), el("strong", "", h), document.createTextNode(" " + t)); steps.append(li); });
     const acts = el("div", "actions");
     for (const s of solicitudes) {
       const oc = solOc.get(s.id);
@@ -135,7 +139,7 @@
     return box;
   }
 
-  const STATUS = { pendiente: ["", "○", "Pendiente"], creada: ["creada", "✓", "OC creada"], bloqueada: ["bloqueada", "✕", "Bloqueada"] };
+  const STATUS = { pendiente: ["", "○", "Pendiente"], creada: ["ok", "✓", "OC creada"], bloqueada: ["falla", "✕", "Bloqueada"] };
   function renderQuick() {
     const ul = $("quick");
     ul.replaceChildren();
@@ -181,9 +185,9 @@
       box.replaceChildren();
       if (!trace.length) { box.append(el("p", "muted small", "Aún sin actividad.")); return; }
       const sum = trace.reduce((a, t) => ({ calls: a.calls + t.usage.calls, inp: a.inp + t.usage.input, out: a.out + t.usage.output, cr: a.cr + t.usage.cacheRead, cost: a.cost + t.usage.costUsd }), { calls: 0, inp: 0, out: 0, cr: 0, cost: 0 });
-      const stats = el("div", "stats");
-      const stat = (v, l) => { const s = el("div", "stat"); s.append(el("b", "", v), el("span", "", l)); return s; };
-      stats.append(stat(trace.length, "Turnos"), stat(sum.calls, "Llamadas al modelo"), stat(`${k(sum.inp)} / ${k(sum.out)}`, "Tokens ent. / sal."), stat(`US$ ${sum.cost.toFixed(4)}`, mock ? "Costo estimado (simulado)" : "Costo estimado"));
+      const stats = el("dl", "stats");
+      const stat = (v, l) => { const r = el("div", "stat"); r.append(el("dt", "", l), el("dd", "", v)); stats.append(r); };
+      stat(trace.length, "Turnos"); stat(sum.calls, "Llamadas al modelo"); stat(`${k(sum.inp)} / ${k(sum.out)}`, "Tokens ent. / sal."); stat(`US$ ${sum.cost.toFixed(4)}`, mock ? "Costo estimado (simulado)" : "Costo estimado");
       box.append(stats);
       const agg = new Map();
       for (const t of trace) for (const x of t.tools) { const a = agg.get(x.name) || { n: 0, ms: 0, err: 0 }; a.n++; a.ms += x.ms; if (!x.ok) a.err++; agg.set(x.name, a); }
@@ -206,7 +210,7 @@
   }
 
   function clearLog() {
-    toolCards.clear(); confirmCards.clear(); toolSol.clear(); solStatus.clear(); solOc.clear();
+    stampNext = null; lastStamped = null; toolCards.clear(); confirmCards.clear(); toolSol.clear(); solStatus.clear(); solOc.clear();
     log.replaceChildren(renderEmpty());
     renderQuick();
   }
@@ -215,12 +219,18 @@
   // ---------- render de eventos ----------
   function addMsg(role, text) {
     dropEmpty();
-    if (role === "user") { log.append(el("div", "msg user", text)); scroll(); return; }
+    if (role === "user") { stampNext = null; lastStamped = null; log.append(el("div", "msg user", text)); scroll(); return; }
     const m = el("div", "msg assistant");
-    const av = el("div", "avatar", "OC"); av.setAttribute("aria-hidden", "true");
-    const col = el("div"); col.style.minWidth = "0";
-    col.append(el("p", "who", "Agente"), prose(text));
-    m.append(av, col);
+    m.append(el("p", "who", "Agente"));
+    const body = prose(text);
+    if (stampNext) {
+      // El sello queda solo en el ultimo mensaje del turno (el resumen final), no en los intermedios.
+      if (lastStamped) { lastStamped.classList.remove("stamped"); lastStamped.querySelector(".seal")?.remove(); }
+      m.classList.add("stamped");
+      body.prepend(el("span", "seal falla", stampNext));
+      lastStamped = m;
+    }
+    m.append(body);
     log.append(m); scroll();
   }
 
@@ -233,11 +243,14 @@
   function controlsTable(list) {
     const wrap = el("div", "tablewrap");
     const t = el("table", "controles");
+    const hr = el("tr");
+    ["Código", "Control", "Resultado", "Detalle"].forEach((h) => { const th = el("th", "", h); th.scope = "col"; hr.append(th); });
+    const th = el("thead"); th.append(hr); t.append(th);
     const tb = el("tbody");
     for (const c of list) {
       const r = el("tr");
-      const a = el("td", "cid"); a.append(ctrlPill(c));
-      r.append(a, el("td", "", `${c.id} · ${c.nombre}`), el("td", "det", c.detalle));
+      const a = el("td", "res"); a.append(ctrlPill(c));
+      r.append(el("td", "cid", c.id), el("td", "cn", c.nombre), a, el("td", "det", c.detalle));
       tb.append(r);
     }
     t.append(tb); wrap.append(t);
@@ -248,9 +261,10 @@
     dropEmpty();
     const d = el("details", "tool");
     const s = el("summary");
-    const status = pill("run", "spin", "ejecutando…");
+    const status = pill("run", "spin", "ejecutando");
     const ms = el("span", "ms");
-    s.append(el("code", "name", e.name), status, ms);
+    const tm = el("time", "tm", clock());
+    s.append(tm, el("code", "name", e.name), el("span", "leader"), status, ms);
     const body = el("div", "body");
     body.append(el("h4", "", "Entrada"), el("pre", "", json(e.input)));
     d.append(s, body);
@@ -269,15 +283,15 @@
     if (c) {
       if (e.ok) swapStatus(c, "ok", "✓", "OK");
       else swapStatus(c, "error", "✕", rechazada ? "Rechazada" : typeof e.output === "string" && e.output.startsWith("No se puede crear") ? "Bloqueada" : "Error");
-      if (e.ms) c.ms.textContent = `${e.ms} ms`;
+      if (e.ms) c.ms.textContent = `${fmtNum(e.ms)} ms`;
       if (e.ok && e.output && Array.isArray(e.output.controles)) c.body.append(el("h4", "", "Controles"), controlsTable(e.output.controles));
       c.body.append(el("h4", "", e.ok ? "Resultado" : "Error"), el("pre", "", json(e.output)));
     }
-    if (e.name === "validar_controles" && e.ok && e.output && e.output.aprobable === false) setSolStatus(sid, "bloqueada");
+    if (e.name === "validar_controles" && e.ok && e.output && e.output.aprobable === false) { stampNext = "Rechazada"; setSolStatus(sid, "bloqueada"); }
     if (e.name === "crear_orden_compra") {
       if (e.ok) { addReceipt(e.output); setSolStatus(sid || (e.output && e.output.solicitudId), "creada", e.output && e.output.numero); }
       // "Bloqueada" SOLO por controles en FALLA; un error transitorio (red, SAP, integridad) no pinta la solicitud.
-      else if (!rechazada && typeof e.output === "string" && e.output.startsWith("No se puede crear")) setSolStatus(sid, "bloqueada");
+      else if (!rechazada && typeof e.output === "string" && e.output.startsWith("No se puede crear")) { stampNext = "Rechazada"; setSolStatus(sid, "bloqueada"); }
     }
     scroll();
   }
@@ -285,19 +299,18 @@
   function addReceipt(oc) {
     if (!oc || typeof oc !== "object") return;
     const r = el("section", "receipt");
-    r.setAttribute("aria-label", "Orden de compra creada");
-    const rk = el("div", "rk"); const ic = el("span", "", "✓"); ic.setAttribute("aria-hidden", "true");
-    rk.append(ic, document.createTextNode("Orden de compra creada"));
-    r.append(rk, el("div", "rnum", oc.numero ?? "—"));
-    const dl = el("dl");
-    const row = (kk, v) => { if (v !== undefined && v !== null && v !== "") dl.append(el("dt", "", kk), el("dd", "", v)); };
+    r.setAttribute("aria-label", "Orden de compra emitida");
+    r.append(el("p", "rk", `Documento emitido · ${folioDate()}`), el("h3", "rt", "Orden de compra No."), el("p", "rnum", oc.numero ?? "—"));
+    r.append(el("span", "seal ok", "Aprobada"));
+    const dl = el("dl", "ledger");
+    const row = (kk, v) => { if (v !== undefined && v !== null && v !== "") { const d = el("div"); d.append(el("dt", "", kk), el("span", "leader"), el("dd", "", v)); dl.append(d); } };
     row("Solicitud", oc.solicitudId);
     row("Proveedor", oc.proveedorId);
     row("Centro de costo", oc.centroCosto);
-    row("Total", oc.total !== undefined ? fmtMoney(oc.total, oc.moneda) : "");
-    row("Comentario del aprobador", oc.comentarioAprobador);
     row("Fecha", oc.fecha);
     r.append(dl);
+    if (oc.total !== undefined) { const t = el("p", "grand"); t.append(el("span", "gl", "Total"), el("span", "gv", fmtNum(oc.total)), el("span", "cur", oc.moneda || "COP")); r.append(t); }
+    if (oc.comentarioAprobador) { const q = el("div", "aprobador"); q.append(el("p", "gl", "Observaciones del aprobador"), el("p", "quote", oc.comentarioAprobador)); r.append(q); }
     log.append(r);
   }
 
@@ -313,7 +326,7 @@
     dropEmpty();
     const v = p.vista;
     const structured = v && Array.isArray(v.lineas);
-    const card = el("section", "gate");
+    const card = el("section", "gate" + (structured ? " structured" : ""));
     card.setAttribute("role", "group");
     card.tabIndex = -1;
     const titleId = "gate-" + p.pendingId;
@@ -321,9 +334,11 @@
 
     const head = el("div", "gate-head");
     const gi = el("div", "gate-icon", "!"); gi.setAttribute("aria-hidden", "true");
-    const ht = el("div"); const title = el("h3", "", "Se requiere tu aprobación"); title.id = titleId;
-    const sub = el("p", "", p.resumen);
-    ht.append(title, sub);
+    const ht = el("div", "gate-title");
+    const folio = el("p", "gate-folio", structured ? `Folio ${v.solicitudId} · ${folioDate()}` : folioDate());
+    const title = el("h3", "", "Orden de compra — pendiente de aprobación"); title.id = titleId;
+    const sub = el("p", "gate-sub", p.resumen);
+    ht.append(folio, title, sub);
     const toggle = el("button", "btn btn-quiet gate-toggle", "Ver detalle"); toggle.type = "button"; toggle.setAttribute("aria-expanded", "false");
     toggle.onclick = () => { const o = card.classList.toggle("open"); toggle.textContent = o ? "Ocultar detalle" : "Ver detalle"; toggle.setAttribute("aria-expanded", String(o)); };
     head.append(gi, ht, toggle);
@@ -331,18 +346,14 @@
     const body = el("div", "gate-body");
     let summary = p.resumen;
     if (structured) {
-      const facts = el("dl", "facts");
-      const fact = (kk, val, cls) => { const f = el("div", "fact" + (cls ? " " + cls : "")); f.append(el("dt", "", kk)); const dd = el("dd"); if (val instanceof Node) dd.append(val); else dd.textContent = val; f.append(dd); facts.append(f); };
+      const facts = el("dl", "ledger facts");
+      const fact = (kk, val) => { const f = el("div"); f.append(el("dt", "", kk), el("span", "leader"), el("dd", "", val)); facts.append(f); };
       fact("Solicitud", v.solicitudId);
       fact("Proveedor", `${v.proveedor.nombre} (${v.proveedor.id})`);
       fact("Centro de costo", v.centroCosto);
-      const tot = document.createDocumentFragment();
-      tot.append(fmtNum(v.total), Object.assign(el("span", "cur", v.moneda || "COP")));
-      fact("Total de la orden", tot, "total");
       body.append(facts);
       summary = `${v.solicitudId} · ${v.proveedor.nombre} · ${fmtMoney(v.total, v.moneda)}`;
 
-      const lw = el("div", "panelbox");
       const t = el("table", "lineas");
       const th = el("thead"); const h = el("tr");
       [["Descripción", ""], ["Cant.", "num"], ["Precio unit.", "num"], ["Subtotal", "num"]].forEach(([x, c]) => { const e1 = el("th", c, x); e1.scope = "col"; h.append(e1); });
@@ -353,21 +364,21 @@
         r.append(el("td", "", l.descripcion), el("td", "num", fmtNum(l.cantidad)), el("td", "num", fmtNum(l.precioUnitario)), el("td", "num", fmtNum(l.subtotal)));
         tb.append(r);
       }
-      const tr = el("tr", "total"); const c1 = el("td", "", "Total"); c1.colSpan = 3;
-      tr.append(c1, el("td", "num", fmtMoney(v.total, v.moneda)));
-      tb.append(tr); t.append(tb);
-      const tw = el("div", "tablewrap"); tw.append(t); lw.append(tw);
-      body.append(el("h4", "", "Líneas"), lw);
+      t.append(tb);
+      const tw = el("div", "tablewrap"); tw.append(t);
+      body.append(el("h4", "", "Líneas"), tw);
+      const tot = el("p", "grand");
+      tot.append(el("span", "gl", "Total"), el("span", "gv", fmtNum(v.total)), el("span", "cur", v.moneda || "COP"));
+      body.append(tot);
 
-      const cw = el("div", "panelbox"); cw.append(controlsTable(v.controles));
-      body.append(el("h4", "", "Controles"), cw);
+      body.append(el("h4", "", "Controles"), controlsTable(v.controles));
 
       if (v.alertas && v.alertas.length) {
-        const co = el("div", "callout"); co.setAttribute("role", "note");
-        const ic = el("span", "ic", "▲"); ic.setAttribute("aria-hidden", "true");
-        const tx = el("div"); tx.append(el("strong", "", `Atención: ${v.alertas.length} alerta(s) para considerar al decidir`));
+        const co = el("aside", "margin-note"); co.setAttribute("role", "note");
+        const hd = el("p", "mn-head"); const ic = el("span", "ic", "▲"); ic.setAttribute("aria-hidden", "true");
+        hd.append(ic, document.createTextNode(` Nota al margen: ${v.alertas.length} alerta(s) para considerar al decidir`));
         const ul = el("ul"); for (const a of v.alertas) ul.append(el("li", "", `${a.id} ${a.nombre}: ${a.detalle}`));
-        tx.append(ul); co.append(ic, tx); body.append(co);
+        co.append(hd, ul); body.append(co);
       }
     } else {
       body.append(el("pre", "", json(v)));
@@ -375,11 +386,11 @@
 
     const form = el("div", "formrow");
     const taId = "c-" + p.pendingId;
-    const lab = el("label", "", "Comentario (opcional)"); lab.htmlFor = taId;
-    const ta = el("textarea"); ta.id = taId; ta.rows = 2; ta.maxLength = 1000; ta.placeholder = "Queda registrado junto con tu decisión";
+    const lab = el("label", "", "Observaciones del aprobador"); lab.htmlFor = taId;
+    const ta = el("textarea"); ta.id = taId; ta.rows = 2; ta.maxLength = 1000; ta.placeholder = "Opcional. Queda registrado junto con tu decisión";
     form.append(lab, ta);
     const actions = el("div", "gate-actions");
-    const ok = el("button", "btn btn-primary", "Aprobar y crear OC"), no = el("button", "btn btn-danger", "Rechazar");
+    const ok = el("button", "btn btn-primary", "Aprobar y crear OC"), no = el("button", "btn btn-outline", "Rechazar");
     ok.type = no.type = "button";
     ok.onclick = () => decide(p.pendingId, "aprobar", ta);
     no.onclick = () => decide(p.pendingId, "rechazar", ta);
@@ -390,7 +401,7 @@
     log.append(card);
     confirmCards.set(p.pendingId, { card, title, sub, ta, ok, no, summary });
     const tc = toolCards.get(p.toolUseId);
-    if (tc) swapStatus(tc, "wait", "…", "esperando aprobación");
+    if (tc) swapStatus(tc, "alerta", "…", "esperando firma");
     card.scrollIntoView({ block: "start" });
     card.focus({ preventScroll: true });
   }
@@ -542,7 +553,7 @@
       } else {
         busy = false;
         // Tarjetas de tools que quedaron sin resultado (turno cortado) no deben mostrar "ejecutando…" para siempre.
-        toolCards.forEach((c) => { if (c.status.textContent.includes("ejecutando")) swapStatus(c, "", "–", "sin resultado"); });
+        toolCards.forEach((c) => { if (c.status.classList.contains("running")) swapStatus(c, "", "–", "sin resultado"); });
       }
       removeRestoreNotice();
     } catch (e) {
@@ -625,6 +636,7 @@
   input.addEventListener("input", () => { input.style.height = "auto"; input.style.height = input.scrollHeight + "px"; });
   resetBtn.onclick = reset;
 
+  $("folio").textContent = folioDate();
   function setHealth(state, text) {
     const b = $("health-badge");
     b.dataset.state = state;
