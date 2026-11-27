@@ -91,7 +91,7 @@ flowchart LR
 |---|---|---|
 | sol-001 | OC creada sin intervención | Todo cumple |
 | sol-002 | Bloqueada (RC1) | "Soluciones Digitales del Norte" (NIT 901999000) no existe en el maestro |
-| sol-003 | Bloqueada (RC2) | Aprueba Felipe Vargas, aprobador de CC-3030 (Comercial), pero la compra es de CC-2020. Además 74 M supera el tope de 30 M del único aprobador de CC-2020 |
+| sol-003 | Bloqueada (RC2 y RC3) | Aprueba Felipe Vargas, aprobador de CC-3030 (Comercial), pero la compra es de CC-2020: no tiene autoridad ni tope en ese centro. Además 74 M supera el tope de 30 M del único aprobador de CC-2020 |
 | sol-004 | Confirmación (RC5) | Cotización de 26,5 M frente a 25 M en la solicitud (+6 %) |
 | sol-005 | Confirmación (RC8), `retroactiva = true` | Factura FC-88231 del 2026-08-10, anterior a la solicitud del 2026-08-27; el propio aprobador escribe "ya llegó la factura" |
 | sol-006 | Confirmación (RC6) y derivado (RC7) | Sin IVA ni condiciones de pago: se derivan C1 y Z030 de TecnoSuministros; sin NIT, el proveedor se identifica por nombre |
@@ -141,7 +141,7 @@ La subárea no tiene campo estándar: va a un campo de cliente o al texto de pos
 - Si la respuesta es ambigua (timeout, 5xx, `201` sin número), **no se reenvía**: queda `INCIERTA` y se reconcilia leyendo por referencia.
 - Las escrituras OData exigen un token CSRF ligado a las cookies de la sesión HTTP.
 - **Error parcial** (cabecera creada y una posición rechazada): OData con inserción profunda es atómico, así que se informa el mensaje de SAP y nada queda a medias. Con BAPI se usa `BAPI_TRANSACTION_ROLLBACK` si hay un error en `RETURN`, y `COMMIT` solo si todo está bien. Antes del commit se puede simular con `TESTRUN = 'X'`.
-- El diseño ejecutable de este esquema (adaptador, estados y candado, con pruebas contra un SAP falso) está en `diseno/sap-real/`. **No está conectado** y nunca se ejecutó contra un SAP real.
+- Este esquema es diseño: no se implementó contra un SAP real. La interfaz `SapAdapter` ya tiene `buscarOrdenPorReferencia`, que es la pieza que la idempotencia necesita.
 
 **Plan B si la conexión no es viable.** El agente igual elimina la digitación y el control mental.
 
@@ -183,9 +183,9 @@ El siguiente paso, barato porque el payload ya está validado, sería un **archi
    - Alternativa descartada: un servidor Node en Render, Fly o Railway con disco.
    - Ganamos una URL pública estable y gratuita, estado fuerte por sesión (candado, confirmación de un solo uso, historial), rate limiting y tope de gasto nativos.
    - El costo: no hay sistema de archivos, así que `out/` es una interfaz con dos implementaciones (archivos reales en local y almacenamiento del DO en la URL). El PRD admite "memoria o archivos".
-4. **Confirmación con botón y con texto.**
-   - Alternativa descartada: solo texto ("confirmo"), como sugiere CA3.
-   - Mantenemos el texto, pero además hay una tarjeta con botón ligada a un identificador de un solo uso. Así una frase ambigua ("ok, ¿y el IVA?") no se interpreta como confirmación, y un doble clic no crea dos órdenes.
+4. **La confirmación la reconoce el servidor, no el modelo.**
+   - Alternativa descartada: dejar que el modelo decida si el usuario confirmó y pase `confirmado = true`.
+   - Un modelo manipulado podría "auto-confirmar". Por eso `oc_crear` solo acepta la confirmación si el servidor marcó el mensaje del usuario como confirmación: un "confirmo" escrito o el botón de la tarjeta, que envía ese mismo mensaje. Una frase ambigua ("ok, ¿y el IVA?") no cuenta. La idempotencia por `solicitud_id` evita que un doble clic cree dos órdenes. `demo.ts` muestra que un `confirmado = true` puesto por el modelo sin confirmación del usuario es rechazado.
 5. **Sonnet en lugar de un modelo más grande o más barato.**
    - Uno más grande no mejora decisiones que toma el código.
    - Uno más barato falla más en *tool use* encadenado, y el costo por caso ya es de centavos.
@@ -195,10 +195,10 @@ El siguiente paso, barato porque el payload ya está validado, sería un **archi
 1. **NIT:** en el maestro va sin dígito de verificación y en la cotización con puntos y dígito (`900.555.111-2`). Se comparan los 9 dígitos base.
 2. **Valores con IVA:** los de la solicitud y la cotización incluyen IVA ("IVA incluido"). RC5 compara totales con IVA y `precio_unitario` se lleva tal como viene en la solicitud.
 3. **"Aprobado":** se busca la palabra sin distinguir mayúsculas ni tildes. "Aprobado desde comercial" cuenta como aprobado; la autoridad la decide RC2.
-4. **RC3 con aprobador inválido:** si RC2 falla porque el remitente no es aprobador del centro, RC3 se evalúa contra el mayor tope del centro, para informar si además habría que escalar.
+4. **RC3 con aprobador inválido:** si el remitente no es aprobador del centro, tampoco tiene tope en ese centro, así que RC3 también se reporta como bloqueo (sol-003 sale con RC2 y RC3). La acción sugerida indica a quién pedir la aprobación y si el monto exige escalar.
 5. **Fechas:** la fecha de aprobación trae hora y zona; RC9 compara la fecha de calendario en America/Bogotá.
-6. **Unidades:** se derivan de la descripción ("horas" → `H`, vigencia mensual → `MES`, el resto `UN`). Ante la duda, `UN`.
-7. **Descripción:** se recorta a 40 caracteres sin cortar palabras; la descripción completa queda en la trazabilidad.
+6. **Unidades:** se derivan del texto del ítem ("hora(s)" → `H`, "mes" o "mensual" → `MES`, el resto `UN`). Ante la duda, `UN`.
+7. **Descripción:** se recorta a 40 caracteres (texto breve de SAP); la trazabilidad lo indica.
 8. **Confirmación:** una confirmación aplica a las confirmaciones mostradas en ese momento. Si el paquete cambia, se vuelve a validar.
 9. **Datos:** los maestros de los fixtures son completos y el correo de aprobación es evidencia suficiente (supuestos del PRD).
 
@@ -206,14 +206,14 @@ El siguiente paso, barato porque el payload ya está validado, sería un **archi
 
 | HU | Estado | Nota y qué falta para producción |
 |---|---|---|
-| HU-1 Leer el paquete | Hecho | Lectura de `.xlsx` y `.pdf` binarios (P1) no implementada; se usan los JSON y TXT normalizados |
+| HU-1 Leer el paquete | Hecho | Un adjunto ausente se devuelve como `null` con su nombre. `oc_leer_excel` (P1 opcional) no se implementó; se usan los JSON y TXT normalizados |
 | HU-2 Validar contra maestros | Hecho | RC1–RC10 con pruebas por regla y por caso. En producción, maestros consultados en SAP en tiempo real |
 | HU-3 Construir el payload | Hecho | Esquema zod y `out/<caso>/trazabilidad.json` con la fuente de cada valor |
-| HU-4 Evidencia de aprobación | Hecho (P0 `.txt` con sha256) | PDF (P1): ver README. En producción, firma digital si auditoría la exige |
+| HU-4 Evidencia de aprobación | Hecho (P0 `.txt` y P1 `.pdf`, con sha256) | En producción, firma digital si auditoría la exige |
 | HU-5 Crear la OC en SAP simulado | Hecho | Secuencial desde 4500000001, idempotente por `solicitud_id`, `control.csv` en cada intento. Falta el adaptador real (sección 6) |
 | HU-6 Manejo de errores | Hecho | Errores tipados y legibles; un caso malo no impide el siguiente |
 | Front, API, adaptador LLM, demo | Hecho | La URL pública está en el README |
-| Bonus `modulo/` | Ver README | — |
+| Bonus `modulo/` | Hecho | `agent.md`, `tools/oc.ts` y `skill/ordenes-compra/SKILL.md` salen de las mismas fuentes que la app; una prueba falla si divergen |
 
 **Para producción falta:** autenticación y roles (la identidad de la analista en `confirmado_por`), el adaptador SAP real, lectura de adjuntos binarios, maestros en vivo, firma de la evidencia y monitoreo.
 
