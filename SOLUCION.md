@@ -82,10 +82,10 @@ flowchart LR
 | RC6 | `indicador_iva` ausente: se deriva del proveedor | Confirmación + derivado | Usa `indicador_iva_default` del maestro |
 | RC7 | `condiciones_pago` ausente: se deriva del proveedor | Derivado | Usa `condiciones_pago_default`; solo se informa |
 | RC8 | Factura con fecha anterior a `fecha_solicitud`: `retroactiva = true` | Confirmación | Se registra en `out/control.csv` |
-| RC9 | Fecha de aprobación ≥ `fecha_solicitud` | Confirmación | Compara fechas de calendario en la zona horaria de Bogotá |
+| RC9 | Fecha de aprobación ≥ `fecha_solicitud` | Confirmación | Compara la fecha de calendario tal como viene en el correo (los fixtures traen la hora local de Bogotá, `-05:00`) |
 | RC10 | `cantidad × valor_unitario` = `valor_total` (± 1) | Bloqueo | Aritmética entera, sin flotantes |
 
-**Resultado esperado con los fixtures** (lo verifica `demo.ts` contra `fixtures/reto-03/esperados.json`):
+**Resultado esperado con los fixtures** (lo verifica `demo.ts` contra `esperados.json`):
 
 | Caso | Resultado | Por qué |
 |---|---|---|
@@ -196,7 +196,7 @@ El siguiente paso, barato porque el payload ya está validado, sería un **archi
 2. **Valores con IVA:** los de la solicitud y la cotización incluyen IVA ("IVA incluido"). RC5 compara totales con IVA y `precio_unitario` se lleva tal como viene en la solicitud.
 3. **"Aprobado":** se busca la palabra sin distinguir mayúsculas ni tildes. "Aprobado desde comercial" cuenta como aprobado; la autoridad la decide RC2.
 4. **RC3 con aprobador inválido:** si el remitente no es aprobador del centro, tampoco tiene tope en ese centro, así que RC3 también se reporta como bloqueo (sol-003 sale con RC2 y RC3). La acción sugerida indica a quién pedir la aprobación y si el monto exige escalar.
-5. **Fechas:** la fecha de aprobación trae hora y zona; RC9 compara la fecha de calendario en America/Bogotá.
+5. **Fechas:** la fecha de aprobación trae hora y zona (`-05:00`); RC9 compara su fecha de calendario local con `fecha_solicitud`, sin convertir zonas.
 6. **Unidades:** se derivan del texto del ítem ("hora(s)" → `H`, "mes" o "mensual" → `MES`, el resto `UN`). Ante la duda, `UN`.
 7. **Descripción:** se recorta a 40 caracteres (texto breve de SAP); la trazabilidad lo indica.
 8. **Confirmación:** una confirmación aplica a las confirmaciones mostradas en ese momento. Si el paquete cambia, se vuelve a validar.

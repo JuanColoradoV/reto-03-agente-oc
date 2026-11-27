@@ -122,13 +122,13 @@ test("tope de tokens por sesión: al superarlo no se llama al modelo", async () 
 });
 
 test("adaptador Anthropic: traduce tipos neutrales, reenvía bloques opacos y clasifica errores", async () => {
-  let enviado: any; // eslint-disable-line @typescript-eslint/no-explicit-any
-  const a = new AnthropicAdapter({ messages: { create: async (p) => { enviado = p; return { content: [{ type: "text", text: "hola" }, { type: "tool_use", id: "u1", name: "oc_validar", input: { caso: "sol-001" } }], stop_reason: "tool_use", usage: { input_tokens: 5, output_tokens: 2 } } as never; } } });
+  let enviado: { messages: unknown[]; system?: Array<{ text: string }> } = { messages: [] };
+  const a = new AnthropicAdapter({ messages: { create: async (p) => { enviado = p as { messages: unknown[]; system?: Array<{ text: string }> }; return { content: [{ type: "text", text: "hola" }, { type: "tool_use", id: "u1", name: "oc_validar", input: { caso: "sol-001" } }], stop_reason: "tool_use", usage: { input_tokens: 5, output_tokens: 2 } } as never; } } });
   const r = await a.enviar([{ rol: "sistema", texto: "S" }, { rol: "usuario", texto: "hola" }, { rol: "usuario", texto: "otra" }], [{ nombre: "oc_validar", descripcion: "d", esquema: { type: "object" } }]);
   assert.deepEqual(r.llamadas, [{ id: "u1", nombre: "oc_validar", args: { caso: "sol-001" } }]);
   assert.equal(r.fin, "herramientas");
   assert.equal(enviado.messages.length, 1, "usuarios consecutivos se fusionan");
-  assert.equal(enviado.system[0].text, "S");
+  assert.equal(enviado.system?.[0]?.text, "S");
   assert.equal(clasificarError({ status: 429 }).codigo, "limite");
   assert.equal(clasificarError({ status: 401 }).codigo, "clave");
   assert.equal(clasificarError(Object.assign(new Error("x"), { name: "TimeoutError" })).codigo, "timeout");

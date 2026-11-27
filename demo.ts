@@ -1,5 +1,5 @@
 // demo.ts - procesa los 6 casos llamando DIRECTAMENTE a las herramientas (sin modelo, sin red, sin clave).
-// Determinista: reloj fijo, out/ limpio al inicio. Compara contra fixtures/reto-03/esperados.json y sale con código 1 si algo falla.
+// Determinista: reloj fijo, out/ limpio al inicio. Compara contra esperados.json y sale con código 1 si algo falla.
 // Uso: npm run demo   |   npx tsx demo.ts
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -31,7 +31,7 @@ const codigos = (xs: { codigo: string }[]) => xs.map((x) => x.codigo);
 const igual = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
 async function main(): Promise<number> {
-  const esperados = (JSON.parse(readFileSync(join(directory, "fixtures/reto-03/esperados.json"), "utf8")) as { casos: Record<string, Esperado> }).casos;
+  const esperados = (JSON.parse(readFileSync(join(directory, "esperados.json"), "utf8")) as { casos: Record<string, Esperado> }).casos;
   await new NodeOutStore(directory).limpiar();
   const fallos: string[] = [];
   const verifica = (caso: string, campo: string, real: unknown, esperado: unknown) => {
@@ -102,7 +102,7 @@ async function main(): Promise<number> {
   const fila005 = filas.find((f) => f.startsWith("SOL-2026-005,creada"));
   if (!fila005 || fila005.split(",")[3] !== "true") fallos.push("control.csv: sol-005 debe quedar creada con retroactiva=true");
   out.push("", "--- out/ ---", ...(await store.listar()).map((f) => `${f.ruta} (${f.bytes} bytes)`), "", `control.csv (${filas.length - 1} intentos):`, ...filas.map((f) => `  ${f}`));
-  out.push("", fallos.length ? `FALLOS (${fallos.length}):\n${fallos.map((f) => `  - ${f}`).join("\n")}` : "OK: los 6 casos coinciden con fixtures/reto-03/esperados.json");
+  out.push("", fallos.length ? `FALLOS (${fallos.length}):\n${fallos.map((f) => `  - ${f}`).join("\n")}` : "OK: los 6 casos coinciden con esperados.json");
   console.log(out.join("\n"));
   return fallos.length === 0 ? 0 : 1;
 }

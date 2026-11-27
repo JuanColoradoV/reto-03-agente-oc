@@ -45,7 +45,7 @@ npm run dev                 # front + backend en http://localhost:8787
 npm run demo        # equivale a: npx tsx demo.ts
 ```
 
-Procesa los 6 casos llamando directamente a las herramientas. Por cada caso imprime `apta`, bloqueos, confirmaciones, `retroactiva` y el número de OC o el motivo. Corre `sol-001` dos veces para mostrar la idempotencia y hace la confirmación explícita de `sol-004`. Limpia `out/` al inicio, es determinista y compara contra `fixtures/reto-03/esperados.json` (sale con código 1 si algo no coincide).
+Procesa los 6 casos llamando directamente a las herramientas. Por cada caso imprime `apta`, bloqueos, confirmaciones, `retroactiva` y el número de OC o el motivo. Corre `sol-001` dos veces para mostrar la idempotencia y hace la confirmación explícita de `sol-004`. Limpia `out/` al inicio, es determinista y compara contra `esperados.json` (sale con código 1 si algo no coincide).
 
 ```bash
 npm test            # pruebas: parsers, reglas RC1–RC10, herramientas, ciclo del agente, guardrails, API, módulo
@@ -114,7 +114,8 @@ La clave del modelo vive solo como secreto del backend (`wrangler secret put ANT
 | `public/` | Front de chat (HTML, CSS y JS, sin build) |
 | `modulo/` | **Bonus §9.4**: el agente empaquetado (`agent.md`, `tools/oc.ts`, `skill/ordenes-compra/SKILL.md`), generado de las mismas fuentes; ver [modulo/README.md](./modulo/README.md) |
 | `demo.ts` | Verificación de herramientas sin modelo |
-| `fixtures/reto-03/` | Fixtures entregados (sin modificar) y `esperados.json` |
+| `fixtures/reto-03/` | Fixtures entregados, sin modificar |
+| `esperados.json` | Resultado esperado por caso, contra el que compara `demo.ts` |
 
 ## Desplegar
 
